@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+
+# Database (contains real data, can be large)
+*.db
+*.db-shm
+*.db-wal
+
+# Trained model files (can be hundreds of MB)
+models/*.keras
+models/*.h5
+
+# Logs
+logs/
+*.log
+
+# TensorFlow
+.tensorflow/

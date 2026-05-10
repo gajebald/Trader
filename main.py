@@ -54,6 +54,19 @@ def cmd_backtest(args) -> None:
     print()
 
 
+def cmd_train(args) -> None:
+    from model_trainer import train
+    setup_database()
+
+    timeframe = getattr(args, "timeframe", "1h")
+    print(f"\nTraining Keras LSTM model on {timeframe} candles...")
+    print("This may take a few minutes depending on available data.\n")
+    try:
+        train(timeframe=timeframe)
+    except ValueError as e:
+        print(f"\nTraining failed: {e}")
+
+
 def cmd_status(args) -> None:
     from paper_trader import get_portfolio_status
     setup_database()
@@ -76,19 +89,32 @@ def main() -> None:
     _setup_logging()
 
     parser = argparse.ArgumentParser(
-        description="IOTA Paper Trading Bot — Bitfinex + Local LLM",
+        description="IOTA Paper Trading Bot — Bitfinex + Keras LSTM",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Commands:
   collect    Start continuous data collection (runs until stopped with Ctrl+C)
+  train      Train the Keras LSTM model on stored historical candles
   paper      Execute one paper trading iteration using current market data
   backtest   Run a historical backtest on stored candle data
   status     Show current portfolio summary
+
+Typical workflow:
+  1. python main.py collect          # collect data for a few hours/days
+  2. python main.py train            # train the LSTM model
+  3. python main.py paper            # run paper trading (loops or one-shot)
+  4. python main.py backtest         # evaluate strategy on history
         """,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("collect", help="Start live data collection loop")
+
+    tr_parser = subparsers.add_parser("train", help="Train Keras LSTM model on stored candles")
+    tr_parser.add_argument(
+        "--timeframe", default="1h", choices=["1m", "5m", "1h"],
+        help="Candle timeframe to train on (default: 1h)",
+    )
 
     subparsers.add_parser("paper", help="Run one paper trading iteration")
 
@@ -102,6 +128,7 @@ Commands:
 
     dispatch = {
         "collect": cmd_collect,
+        "train": cmd_train,
         "paper": cmd_paper,
         "backtest": cmd_backtest,
         "status": cmd_status,

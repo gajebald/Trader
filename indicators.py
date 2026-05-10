@@ -7,6 +7,22 @@ from config import (
     MACD_FAST, MACD_SLOW, MACD_SIGNAL, VOLATILITY_WINDOW,
 )
 
+# Ordered list of feature columns used by the Keras model.
+# Order matters — must be identical between training and inference.
+FEATURE_COLUMNS = [
+    "rsi_norm",
+    "price_vs_sma20",
+    "price_vs_sma50",
+    "sma20_vs_sma50",
+    "price_vs_ema20",
+    "macd_norm",
+    "macd_signal_norm",
+    "macd_hist_norm",
+    "volatility_norm",
+    "pct_change_clipped",
+    "high_low_ratio",
+]
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,6 +70,32 @@ def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
     df = add_macd(df)
     df = add_volatility(df)
     df["pct_change"] = df["close"].pct_change()
+    return df
+
+
+def prepare_model_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute scale-invariant normalized features for the Keras model.
+    Must be called on a DataFrame already enriched by calculate_all().
+    Returns a new DataFrame with FEATURE_COLUMNS added (NaN where inputs are missing).
+    """
+    df = df.copy()
+    price = df["close"].replace(0, float("nan"))
+    sma20 = df[f"sma_{SMA_SHORT}"].replace(0, float("nan"))
+    sma50 = df[f"sma_{SMA_LONG}"].replace(0, float("nan"))
+    low = df["low"].replace(0, float("nan"))
+
+    df["rsi_norm"] = df["rsi"] / 100.0
+    df["price_vs_sma20"] = (price - sma20) / sma20
+    df["price_vs_sma50"] = (price - sma50) / sma50
+    df["sma20_vs_sma50"] = (sma20 - sma50) / sma50
+    df["price_vs_ema20"] = (price - df[f"ema_{EMA_PERIOD}"]) / df[f"ema_{EMA_PERIOD}"].replace(0, float("nan"))
+    df["macd_norm"] = df["macd"] / price
+    df["macd_signal_norm"] = df["macd_signal"] / price
+    df["macd_hist_norm"] = df["macd_hist"] / price
+    df["volatility_norm"] = df["volatility"] / price
+    df["pct_change_clipped"] = df["pct_change"].clip(-0.1, 0.1)
+    df["high_low_ratio"] = (df["high"] - df["low"]) / low
     return df
 
 

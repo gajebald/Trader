@@ -2,12 +2,12 @@ import logging
 
 from config import (
     SYMBOL, RSI_OVERBOUGHT, RSI_OVERSOLD,
-    STOP_LOSS_PCT, TAKE_PROFIT_PCT, LLM_CONFIDENCE_THRESHOLD,
+    STOP_LOSS_PCT, TAKE_PROFIT_PCT, MODEL_CONFIDENCE_THRESHOLD,
     SMA_LONG,
 )
 from database import get_recent_candles, get_open_position
 from indicators import calculate_all, get_latest_signals
-from llm_advisor import get_advice
+from keras_advisor import get_advice
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ def check_take_profit(entry_price: float, current_price: float) -> bool:
 def apply_rules(
     signals: dict,
     position: dict | None,
-    llm_advice: dict,
+    model_advice: dict,
 ) -> tuple[str, str]:
     rsi = signals.get("rsi")
     current_price = signals.get("last_price")
-    llm_decision = llm_advice.get("decision", "HOLD")
-    llm_confidence = llm_advice.get("confidence", 0.0)
+    model_decision = model_advice.get("decision", "HOLD")
+    model_confidence = model_advice.get("confidence", 0.0)
 
     if position:
         entry_price = position["price"]
@@ -42,10 +42,10 @@ def apply_rules(
         if (
             rsi is not None
             and rsi > RSI_OVERBOUGHT
-            and llm_decision == "SELL"
-            and llm_confidence >= LLM_CONFIDENCE_THRESHOLD
+            and model_decision == "SELL"
+            and model_confidence >= MODEL_CONFIDENCE_THRESHOLD
         ):
-            return "SELL", f"rsi_overbought ({rsi:.1f}) + LLM SELL (conf={llm_confidence:.2f})"
+            return "SELL", f"rsi_overbought ({rsi:.1f}) + model SELL (conf={model_confidence:.2f})"
 
         return "HOLD", "no_exit_conditions_met"
 
@@ -53,8 +53,8 @@ def apply_rules(
     if rsi is not None and rsi > RSI_OVERBOUGHT:
         return "HOLD", f"rsi_overbought ({rsi:.1f})"
 
-    if llm_decision == "BUY" and llm_confidence >= LLM_CONFIDENCE_THRESHOLD:
-        return "BUY", f"LLM BUY signal (conf={llm_confidence:.2f}, risk={llm_advice.get('risk_level')})"
+    if model_decision == "BUY" and model_confidence >= MODEL_CONFIDENCE_THRESHOLD:
+        return "BUY", f"model BUY (conf={model_confidence:.2f}, risk={model_advice.get('risk_level')})"
 
     return "HOLD", "no_entry_conditions_met"
 
@@ -72,9 +72,11 @@ def evaluate(timeframe: str = "5m") -> tuple[str, str, dict]:
     df = calculate_all(df)
     signals = get_latest_signals(df)
     position = get_open_position()
-    llm_advice = get_advice(signals, position)
 
-    action, reason = apply_rules(signals, position, llm_advice)
+    # Pass the full indicator-enriched DataFrame so the LSTM can use the sequence
+    model_advice = get_advice(df, position)
+
+    action, reason = apply_rules(signals, position, model_advice)
     logger.info("Strategy decision: %s | reason: %s | rsi=%.1f",
                 action, reason, signals.get("rsi") or 0)
     return action, reason, signals
