@@ -4,6 +4,7 @@ Zeigt Portfolio, Trades und aktuelle Marktsignale.
 Läuft auf localhost, nginx proxied von außen.
 """
 import os
+import time as _time
 import logging
 from datetime import datetime
 
@@ -12,9 +13,10 @@ from flask import Flask, render_template_string
 from config import (
     SYMBOL, STARTING_CAPITAL, DASHBOARD_HOST, DASHBOARD_PORT,
     DASHBOARD_REFRESH_SECONDS, MODEL_PATH,
+    LOOKBACK_STEPS, LOOKAHEAD_BARS, LABEL_THRESHOLD_PCT, MIN_TRAINING_SAMPLES,
 )
 from database import get_all_trades, get_open_position, get_latest_ticker, get_recent_candles, get_data_stats
-from indicators import calculate_all, get_latest_signals
+from indicators import FEATURE_COLUMNS, calculate_all, get_latest_signals, prepare_model_features
 from paper_trader import get_portfolio_status
 
 logger = logging.getLogger(__name__)
@@ -219,6 +221,55 @@ _TEMPLATE = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Trainingsdaten -->
+<div class="section-title">Trainingsdaten</div>
+<div class="panel">
+  <table>
+    <thead>
+      <tr>
+        <th>Zeitrahmen</th>
+        <th>Candles</th>
+        <th>Saubere Zeilen</th>
+        <th>Sequenzen</th>
+        <th>HOLD</th>
+        <th>BUY</th>
+        <th>SELL</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for tf, d in training_stats.items() %}
+      <tr>
+        <td style="color:#38bdf8;font-weight:700">{{ tf }}</td>
+        <td>{{ d.candles }}</td>
+        <td>{{ d.clean_rows }}</td>
+        <td>{{ d.sequences }}</td>
+        <td class="hold">{{ d.hold }}</td>
+        <td class="buy">{{ d.buy }}</td>
+        <td class="sell">{{ d.sell }}</td>
+        <td>
+          {% if d.ready %}
+            <span class="status-dot dot-green"></span><span style="color:#4ade80">Bereit</span>
+          {% elif d.sequences > 0 %}
+            <span class="status-dot dot-yellow"></span><span style="color:#facc15">Zu wenig (min. {{ min_samples }})</span>
+          {% else %}
+            <span class="status-dot dot-red"></span><span style="color:#f87171">Keine Daten</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div style="margin-top:12px;font-size:0.78rem;color:#475569">
+    Lookback: <strong style="color:#94a3b8">{{ lookback_steps }} Bars</strong> &nbsp;|&nbsp;
+    Lookahead: <strong style="color:#94a3b8">{{ lookahead_bars }} Bars</strong> &nbsp;|&nbsp;
+    Schwelle: <strong style="color:#94a3b8">±{{ "%.1f"|format(label_threshold_pct * 100) }}%</strong>
+    &nbsp;|&nbsp;
+    Training starten:
+    <code style="color:#38bdf8;background:#161b27;padding:2px 6px;border-radius:4px">python main.py train --timeframe 1h</code>
+  </div>
+</div>
+
 <!-- Technische Signale -->
 <div class="section-title">Technische Signale (5m)</div>
 <div class="panel">
@@ -331,6 +382,56 @@ def _get_signals() -> dict:
         return {}
 
 
+_training_cache: dict = {"data": None, "ts": 0.0}
+_TRAINING_CACHE_TTL = 300  # seconds
+
+
+def _get_training_stats() -> dict:
+    now = _time.monotonic()
+    if _training_cache["data"] is not None and now - _training_cache["ts"] < _TRAINING_CACHE_TTL:
+        return _training_cache["data"]
+
+    result = {}
+    for tf in ["1m", "5m", "1h"]:
+        try:
+            df = get_recent_candles(SYMBOL, tf, limit=5000)
+            if len(df) < 10:
+                result[tf] = {"candles": len(df), "clean_rows": 0, "sequences": 0, "hold": 0, "buy": 0, "sell": 0, "ready": False}
+                continue
+            df = calculate_all(df)
+            df = prepare_model_features(df)
+            clean = df[FEATURE_COLUMNS + ["close"]].dropna().reset_index(drop=True)
+            clean_len = len(clean)
+            hold = buy = sell = 0
+            if clean_len > LOOKAHEAD_BARS:
+                closes = clean["close"].values
+                for i in range(clean_len - LOOKAHEAD_BARS):
+                    fr = (closes[i + LOOKAHEAD_BARS] - closes[i]) / closes[i]
+                    if fr > LABEL_THRESHOLD_PCT:
+                        buy += 1
+                    elif fr < -LABEL_THRESHOLD_PCT:
+                        sell += 1
+                    else:
+                        hold += 1
+            sequences = max(0, clean_len - LOOKBACK_STEPS - LOOKAHEAD_BARS)
+            result[tf] = {
+                "candles": len(df),
+                "clean_rows": clean_len,
+                "sequences": sequences,
+                "hold": hold,
+                "buy": buy,
+                "sell": sell,
+                "ready": sequences >= MIN_TRAINING_SAMPLES,
+            }
+        except Exception as e:
+            logger.warning("Trainingsstats für %s fehlgeschlagen: %s", tf, e)
+            result[tf] = {"candles": 0, "clean_rows": 0, "sequences": 0, "hold": 0, "buy": 0, "sell": 0, "ready": False}
+
+    _training_cache["data"] = result
+    _training_cache["ts"] = now
+    return result
+
+
 def _format_trades(raw: list) -> list:
     result = []
     for t in reversed(raw[-20:]):
@@ -362,6 +463,7 @@ def index():
     position = get_open_position()
     model_ready = os.path.exists(MODEL_PATH)
     stats = get_data_stats(SYMBOL)
+    training_stats = _get_training_stats()
 
     return render_template_string(
         _TEMPLATE,
@@ -371,10 +473,15 @@ def index():
         position=position,
         model_ready=model_ready,
         stats=stats,
+        training_stats=training_stats,
         symbol=SYMBOL,
         start_capital=STARTING_CAPITAL,
         refresh=DASHBOARD_REFRESH_SECONDS,
         now=datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+        min_samples=MIN_TRAINING_SAMPLES,
+        lookback_steps=LOOKBACK_STEPS,
+        lookahead_bars=LOOKAHEAD_BARS,
+        label_threshold_pct=LABEL_THRESHOLD_PCT,
     )
 
 
