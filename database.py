@@ -138,6 +138,40 @@ def get_all_trades() -> list:
     return [dict(r) for r in rows]
 
 
+def get_data_stats(symbol: str) -> dict:
+    """Returns collection stats per timeframe plus ticker count."""
+    with _get_connection() as conn:
+        ticker_count = conn.execute(
+            "SELECT COUNT(*) FROM ticker_data WHERE symbol = ?", (symbol,)
+        ).fetchone()[0]
+
+        latest_ticker = conn.execute(
+            "SELECT timestamp FROM ticker_data WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1",
+            (symbol,),
+        ).fetchone()
+
+        timeframes = {}
+        for tf in ["1m", "5m", "1h"]:
+            row = conn.execute("""
+                SELECT COUNT(*) as cnt,
+                       MIN(timestamp) as first_ts,
+                       MAX(timestamp) as last_ts
+                FROM candle_data
+                WHERE symbol = ? AND timeframe = ?
+            """, (symbol, tf)).fetchone()
+            timeframes[tf] = {
+                "count": row[0],
+                "first_ts": row[1],
+                "last_ts": row[2],
+            }
+
+    return {
+        "ticker_count": ticker_count,
+        "latest_ticker_ts": latest_ticker[0] if latest_ticker else None,
+        "timeframes": timeframes,
+    }
+
+
 def get_open_position() -> dict | None:
     with _get_connection() as conn:
         row = conn.execute("""

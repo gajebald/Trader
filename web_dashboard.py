@@ -13,12 +13,23 @@ from config import (
     SYMBOL, STARTING_CAPITAL, DASHBOARD_HOST, DASHBOARD_PORT,
     DASHBOARD_REFRESH_SECONDS, MODEL_PATH,
 )
-from database import get_all_trades, get_open_position, get_latest_ticker, get_recent_candles
+from database import get_all_trades, get_open_position, get_latest_ticker, get_recent_candles, get_data_stats
 from indicators import calculate_all, get_latest_signals
 from paper_trader import get_portfolio_status
 
 logger = logging.getLogger(__name__)
 app = Flask(__name__)
+
+
+@app.template_filter("ts")
+def _ts_filter(ms):
+    """Formatiert einen Unix-Millisekunden-Timestamp als lesbares Datum."""
+    if not ms:
+        return "—"
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000).strftime("%d.%m.%y %H:%M")
+    except Exception:
+        return "—"
 
 # -------------------------------------------------------
 # HTML-Template (inline, keine externen Abhängigkeiten)
@@ -92,6 +103,13 @@ _TEMPLATE = """<!DOCTYPE html>
 
     .empty { color: #475569; font-style: italic; text-align: center; padding: 20px; }
     footer { text-align: center; color: #334155; font-size: 0.75rem; margin-top: 12px; }
+
+    .tf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+    .tf-card { background: #161b27; border-radius: 8px; padding: 12px 14px; }
+    .tf-name { font-size: 0.75rem; color: #38bdf8; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+    .tf-count { font-size: 1.4rem; font-weight: 700; color: #f8fafc; }
+    .tf-label { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
+    .tf-range { font-size: 0.72rem; color: #475569; margin-top: 6px; border-top: 1px solid #1e2330; padding-top: 6px; }
   </style>
 </head>
 <body>
@@ -164,6 +182,40 @@ _TEMPLATE = """<!DOCTYPE html>
         <span class="status-dot dot-yellow"></span>Nicht trainiert
       {% endif %}
     </div>
+  </div>
+</div>
+
+<!-- Gesammelte Daten -->
+<div class="section-title">Gesammelte Daten</div>
+<div class="panel">
+  <div class="tf-grid">
+    <div class="tf-card">
+      <div class="tf-name">Ticker</div>
+      <div class="tf-count">{{ stats.ticker_count }}</div>
+      <div class="tf-label">Einträge gesamt</div>
+      {% if stats.latest_ticker_ts %}
+      <div class="tf-range">Letzter: {{ stats.latest_ticker_ts | ts }}</div>
+      {% endif %}
+    </div>
+    {% for tf, d in stats.timeframes.items() %}
+    <div class="tf-card">
+      <div class="tf-name">{{ tf }} Candles</div>
+      <div class="tf-count {{ 'green' if d.count >= 100 else ('yellow' if d.count > 0 else 'gray') }}">
+        {{ d.count }}
+      </div>
+      <div class="tf-label">
+        {% if d.count >= 100 %}ausreichend für Training
+        {% elif d.count > 0 %}zu wenig für Training (min. 100)
+        {% else %}noch keine Daten
+        {% endif %}
+      </div>
+      {% if d.first_ts and d.last_ts %}
+      <div class="tf-range">
+        {{ d.first_ts | ts }} –<br>{{ d.last_ts | ts }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
 </div>
 
@@ -309,6 +361,7 @@ def index():
     signals = _get_signals()
     position = get_open_position()
     model_ready = os.path.exists(MODEL_PATH)
+    stats = get_data_stats(SYMBOL)
 
     return render_template_string(
         _TEMPLATE,
@@ -317,6 +370,7 @@ def index():
         signals=signals,
         position=position,
         model_ready=model_ready,
+        stats=stats,
         symbol=SYMBOL,
         start_capital=STARTING_CAPITAL,
         refresh=DASHBOARD_REFRESH_SECONDS,
