@@ -43,3 +43,8 @@ MIN_TRAINING_SAMPLES = 100   # minimum windows required to start training
 
 # --- Collection schedule ---
 COLLECT_INTERVAL_SECONDS = 60
+
+# --- Web Dashboard ---
+DASHBOARD_HOST = "127.0.0.1"  # nur lokal, nginx proxied von außen
+DASHBOARD_PORT = 5000
+DASHBOARD_REFRESH_SECONDS = 30

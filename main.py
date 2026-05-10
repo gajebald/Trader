@@ -16,6 +16,12 @@ def _setup_logging() -> None:
     )
 
 
+def cmd_dashboard(args) -> None:
+    from web_dashboard import run
+    setup_database()
+    run()
+
+
 def cmd_collect(args) -> None:
     from data_collector import run_collection_loop
     setup_database()
@@ -126,12 +132,15 @@ Typical workflow:
 
     subparsers.add_parser("status", help="Show portfolio status")
 
+    subparsers.add_parser("dashboard", help="Start web dashboard (http://localhost:5000)")
+
     dispatch = {
         "collect": cmd_collect,
         "train": cmd_train,
         "paper": cmd_paper,
         "backtest": cmd_backtest,
         "status": cmd_status,
+        "dashboard": cmd_dashboard,
     }
 
     args = parser.parse_args()
