@@ -18,6 +18,20 @@ Ein Python-Paper-Trading-Bot für IOTA/USD auf Basis von Bitfinex-Marktdaten, te
 
 ## Installation auf dem Server
 
+### Schnellinstallation (empfohlen)
+
+```bash
+git clone https://github.com/gajebald/Trader.git
+cd Trader
+bash install.sh
+```
+
+Das Skript erledigt alle nachfolgenden Schritte automatisch: Systempakete, Python-Versionscheck, virtuelle Umgebung, Abhängigkeiten (mit GPU/CPU-Auswahl) und Verzeichnisse.
+
+---
+
+### Manuelle Installation (Schritt für Schritt)
+
 ### Schritt 1 — Systempakete installieren
 
 ```bash
