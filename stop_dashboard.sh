@@ -1,9 +1,11 @@
 #!/bin/bash
 # stop_dashboard.sh — Stoppt das Web-Dashboard
 
-LOGFILE=/home/user/Trader/logs/dashboard-start.log
+TRADER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOGFILE="$TRADER_DIR/logs/dashboard-start.log"
 TMUX_SESSION="iota-dashboard"
 
+mkdir -p "$TRADER_DIR/logs"
 echo "=== $(date) Stop Dashboard ===" >> "$LOGFILE"
 
 pkill -f "web_dashboard.py" 2>/dev/null
