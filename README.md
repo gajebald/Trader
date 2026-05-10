@@ -10,26 +10,89 @@ Ein Python-Paper-Trading-Bot für IOTA/USD auf Basis von Bitfinex-Marktdaten, te
 
 - Ubuntu 22.04+ (oder ein aktuelles Linux-System)
 - Python 3.11+
+- Git
 - Internetzugang (für die Bitfinex-API)
-- Ca. 500 MB Speicherplatz (für TensorFlow)
+- Ca. 500 MB Speicherplatz (für TensorFlow) + ca. 1 GB für die Datenbank
 
 ---
 
-## Installation
+## Installation auf dem Server
+
+### Schritt 1 — Systempakete installieren
 
 ```bash
-# 1. In das Projektverzeichnis wechseln
-cd ~/Trader
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y python3 python3-pip python3-venv git
+```
 
-# 2. Virtuelle Umgebung erstellen und aktivieren
+Python-Version prüfen (muss 3.11+):
+
+```bash
+python3 --version
+```
+
+Falls die Version zu alt ist (Ubuntu 20.04):
+
+```bash
+sudo add-apt-repository ppa:deadsnakes/ppa -y
+sudo apt update
+sudo apt install -y python3.11 python3.11-venv python3.11-pip
+```
+
+### Schritt 2 — Repository klonen
+
+```bash
+cd ~
+git clone https://github.com/gajebald/Trader.git
+cd Trader
+```
+
+Bei späteren Updates:
+
+```bash
+cd ~/Trader
+git pull origin main
+```
+
+### Schritt 3 — Virtuelle Umgebung erstellen
+
+```bash
 python3 -m venv venv
 source venv/bin/activate
+```
 
-# 3. Abhängigkeiten installieren
+Die virtuelle Umgebung muss bei jeder neuen SSH-Sitzung erneut aktiviert werden:
+
+```bash
+source ~/Trader/venv/bin/activate
+```
+
+### Schritt 4 — Abhängigkeiten installieren
+
+Standard (mit GPU-Unterstützung):
+
+```bash
 pip install -r requirements.txt
+```
 
-# Alternativ auf reinen CPU-Servern (schlanker):
-# pip install tensorflow-cpu>=2.13.0
+Auf reinen CPU-Servern (ohne Grafikkarte, schlanker und schneller):
+
+```bash
+pip install requests>=2.31.0 pandas>=2.0.0 schedule>=1.2.0 numpy>=1.24.0
+pip install tensorflow-cpu>=2.13.0
+```
+
+Installation prüfen:
+
+```bash
+python3 -c "import tensorflow as tf; print('TF:', tf.__version__)"
+python3 -c "import pandas as pd; print('pandas:', pd.__version__)"
+```
+
+### Schritt 5 — Verzeichnisse anlegen
+
+```bash
+mkdir -p ~/Trader/logs
 ```
 
 ---
