@@ -91,7 +91,7 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
         raise ImportError("TensorFlow is required. Install with: pip install tensorflow")
 
     logger.info("Loading candle data: symbol=%s timeframe=%s", symbol, timeframe)
-    df = get_recent_candles(symbol, timeframe, limit=5000)
+    df = get_recent_candles(symbol, timeframe, limit=50000)  # load ALL available data
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     if len(df) < SMA_LONG + LOOKBACK_STEPS + LOOKAHEAD_BARS + 1:
@@ -130,12 +130,18 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
             f"Only {len(X)} training windows after sequencing. Need {MIN_TRAINING_SAMPLES}."
         )
 
-    # Compute class weights to handle the typical HOLD-heavy imbalance
+    # Compute class weights — capped at 3.0 to prevent over-correction
     n_total = len(y)
     class_weight = {}
     for cls in [0, 1, 2]:
         count = int((y == cls).sum())
-        class_weight[cls] = n_total / (3 * count) if count > 0 else 1.0
+        raw = n_total / (3 * count) if count > 0 else 1.0
+        class_weight[cls] = min(raw, 3.0)
+
+    logger.info(
+        "Class weights (capped): HOLD=%.2f BUY=%.2f SELL=%.2f",
+        class_weight[0], class_weight[1], class_weight[2],
+    )
 
     # 80/20 train/validation split (time-ordered — no shuffling across the split)
     split = int(len(X) * 0.8)

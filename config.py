@@ -36,8 +36,8 @@ STARTING_CAPITAL = 1000.0  # USD
 MODEL_PATH = "models/trading_model.keras"
 MODEL_METRICS_PATH = "models/training_metrics.json"
 LOOKBACK_STEPS = 48          # bars of history per prediction window (48h on 1h data)
-LOOKAHEAD_BARS = 24          # bars ahead for labels (24h = next day on 1h data)
-LABEL_THRESHOLD_PCT = 0.03   # 3% future move → BUY or SELL (filters out noise)
+LOOKAHEAD_BARS = 12          # bars ahead for labels (12h on 1h data)
+LABEL_THRESHOLD_PCT = 0.025  # 2.5% future move → BUY or SELL
 TRAINING_EPOCHS = 50
 TRAINING_BATCH_SIZE = 32
 MIN_TRAINING_SAMPLES = 100   # minimum windows required to start training
