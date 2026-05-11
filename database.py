@@ -186,3 +186,10 @@ def get_open_position() -> dict | None:
             LIMIT 1
         """).fetchone()
     return dict(row) if row else None
+
+
+def reset_trades() -> int:
+    """Delete all trades and return the number of deleted rows."""
+    with _get_connection() as conn:
+        result = conn.execute("DELETE FROM trades")
+        return result.rowcount

@@ -22,7 +22,7 @@ from config import (
     LOOKBACK_STEPS, LOOKAHEAD_BARS, LABEL_THRESHOLD_PCT, MIN_TRAINING_SAMPLES,
     DASHBOARD_PASSWORD, DASHBOARD_SECRET_KEY,
 )
-from database import get_all_trades, get_open_position, get_recent_candles, get_data_stats
+from database import get_all_trades, get_open_position, get_recent_candles, get_data_stats, reset_trades
 from indicators import FEATURE_COLUMNS, calculate_all, get_latest_signals, prepare_model_features
 from paper_trader import get_portfolio_status
 
@@ -120,7 +120,7 @@ _TEMPLATE = """<!DOCTYPE html>
   <script>
   function dashboard() {
     return {
-      activeTab: 'signals',
+      activeTab: 'kurs',
       collector:   { running: null },
       trader:      { running: null },
       training:    { running: null, model_ready: false },
@@ -129,11 +129,18 @@ _TEMPLATE = """<!DOCTYPE html>
       paperLog:    '',
       historyLog:  '',
       trainingLog: '',
+      priceChart:   null,
+      priceChartTf: '1h',
+      priceLoading: false,
 
       init() {
         this.pollAll();
         setInterval(() => this.pollAll(), 10000);
         setTimeout(() => this.initChart(), 200);
+        setTimeout(() => this.loadPriceChart('1h'), 300);
+        this.$watch('activeTab', val => {
+          if (val === 'kurs') this.$nextTick(() => this.loadPriceChart());
+        });
       },
 
       async pollAll() {
@@ -284,6 +291,108 @@ _TEMPLATE = """<!DOCTYPE html>
         });
       },
 
+      async loadPriceChart(tf) {
+        tf = tf || this.priceChartTf;
+        this.priceChartTf = tf;
+        this.priceLoading = true;
+        try {
+          const d = await fetch('/api/chart/data?timeframe=' + tf + '&limit=300').then(r => r.json());
+          const canvas = document.getElementById('price-chart');
+          if (!canvas || !d.close.length) { this.priceLoading = false; return; }
+          if (this.priceChart) {
+            this.priceChart.data.labels = d.labels;
+            this.priceChart.data.datasets[0].data = d.close;
+            this.priceChart.data.datasets[1].data = d.high;
+            this.priceChart.data.datasets[2].data = d.low;
+            this.priceChart.update('none');
+          } else {
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createLinearGradient(0, 0, 0, 340);
+            grad.addColorStop(0, 'rgba(56,189,248,0.18)');
+            grad.addColorStop(1, 'rgba(56,189,248,0)');
+            this.priceChart = new Chart(canvas, {
+              type: 'line',
+              data: {
+                labels: d.labels,
+                datasets: [
+                  {
+                    label: 'Close',
+                    data: d.close,
+                    borderColor: '#38bdf8',
+                    backgroundColor: grad,
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    fill: true,
+                    tension: 0.3,
+                    order: 1,
+                  },
+                  {
+                    label: 'High',
+                    data: d.high,
+                    borderColor: 'rgba(52,211,153,0.35)',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.3,
+                    order: 2,
+                  },
+                  {
+                    label: 'Low',
+                    data: d.low,
+                    borderColor: 'rgba(248,113,113,0.35)',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.3,
+                    order: 3,
+                  }
+                ]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { intersect: false, mode: 'index' },
+                plugins: {
+                  legend: { labels: { color: '#475569', boxWidth: 10, font: { size: 11 } } },
+                  tooltip: {
+                    callbacks: {
+                      label: ctx => ctx.dataset.label + ': $' + ctx.raw.toFixed(4)
+                    }
+                  }
+                },
+                scales: {
+                  x: {
+                    ticks: { color: '#475569', maxTicksLimit: 8, font: { size: 10 } },
+                    grid: { color: '#1e293b' },
+                  },
+                  y: {
+                    ticks: { color: '#475569', font: { size: 10 }, callback: v => '$' + v.toFixed(3) },
+                    grid: { color: '#1e293b' },
+                    position: 'right',
+                  }
+                }
+              }
+            });
+          }
+        } catch(e) { console.error('Chart load failed', e); }
+        this.priceLoading = false;
+      },
+
+      async resetPortfolio() {
+        if (!confirm('Alle Trades löschen und Portfolio auf Startkapital zurücksetzen?\\n\\nDiese Aktion kann nicht rückgängig gemacht werden.')) return;
+        try {
+          const d = await fetch('/api/paper/reset', { method: 'POST' }).then(r => r.json());
+          if (d.ok) {
+            alert(d.deleted + ' Trade(s) gelöscht. Portfolio wurde zurückgesetzt.');
+            location.reload();
+          } else {
+            alert('Fehler: ' + (d.message || 'Unbekannt'));
+          }
+        } catch(e) {
+          alert('Verbindungsfehler: ' + e.message);
+        }
+      },
+
       dotClass(v) {
         if (v === null) return 'bg-amber-400 animate-pulse';
         return v ? 'bg-emerald-400' : 'bg-slate-600';
@@ -352,7 +461,14 @@ _TEMPLATE = """<!DOCTYPE html>
 
   <!-- ===== PORTFOLIO ===== -->
   <section>
-    <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Portfolio</h2>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500">Portfolio</h2>
+      <button @click="resetPortfolio()"
+              class="text-xs text-red-500 hover:text-red-400 border border-red-900/40 hover:border-red-700
+                     rounded-lg px-3 py-1.5 transition-colors flex items-center gap-1.5">
+        &#8635; Reset
+      </button>
+    </div>
     <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
 
       <div class="col-span-2 bg-gradient-to-br from-sky-900/30 to-slate-900 border border-sky-800/40 rounded-2xl p-5">
@@ -553,6 +669,13 @@ _TEMPLATE = """<!DOCTYPE html>
   <section>
     <!-- Tab bar -->
     <div class="flex gap-0 border-b border-slate-800 mb-5 -mx-1">
+      <button @click="activeTab = 'kurs'"
+              :class="activeTab === 'kurs'
+                ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
+                : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+        Kurschart
+      </button>
       <button @click="activeTab = 'signals'"
               :class="activeTab === 'signals'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
@@ -582,6 +705,44 @@ _TEMPLATE = """<!DOCTYPE html>
         Trades
         {% if trades %}<span class="ml-1.5 bg-slate-800 text-slate-400 text-xs rounded-full px-1.5 py-0.5">{{ trades|length }}</span>{% endif %}
       </button>
+    </div>
+
+    <!-- ── Tab: Kurs ── -->
+    <div x-show="activeTab === 'kurs'" x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+      <!-- Timeframe selector -->
+      <div class="flex items-center gap-2 mb-4">
+        <span class="text-xs text-slate-500">Zeitrahmen:</span>
+        <template x-for="tf in ['1m','5m','1h']" :key="tf">
+          <button @click="loadPriceChart(tf)"
+                  :class="priceChartTf === tf
+                    ? 'bg-sky-900/50 text-sky-400 border-sky-700'
+                    : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'"
+                  class="px-3 py-1 text-xs font-semibold rounded-lg border transition-colors"
+                  x-text="tf"></button>
+        </template>
+        <span x-show="priceLoading" class="text-xs text-slate-500 flex items-center gap-1.5 ml-1">
+          <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          Lädt…
+        </span>
+        <span class="ml-auto text-xs text-slate-600">IOTA/USD &bull; Bitfinex &bull; letzte 300 Bars</span>
+      </div>
+      <!-- Chart canvas -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div style="height: 360px; position: relative;">
+          <canvas id="price-chart"></canvas>
+          <div x-show="!priceLoading && priceChart === null"
+               class="absolute inset-0 flex items-center justify-center">
+            <div class="text-center">
+              <div class="text-3xl mb-3">📡</div>
+              <p class="text-slate-500 text-sm">Noch keine Kursdaten — bitte zuerst den Datensammler starten.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── Tab: Signale ── -->
@@ -1211,6 +1372,49 @@ def api_paper_run():
         return jsonify({"ok": False, "output": "Timeout nach 60 Sekunden."})
     except Exception as e:
         return jsonify({"ok": False, "output": str(e)})
+
+
+# -------------------------------------------------------
+# API — Chart data
+# -------------------------------------------------------
+@app.route("/api/chart/data")
+@login_required
+def api_chart_data():
+    tf = request.args.get("timeframe", "1h")
+    if tf not in ("1m", "5m", "1h"):
+        tf = "1h"
+    try:
+        limit = min(int(request.args.get("limit", 200)), 1000)
+    except ValueError:
+        limit = 200
+    df = get_recent_candles(SYMBOL, tf, limit=limit)
+    if df.empty:
+        return jsonify({"labels": [], "close": [], "high": [], "low": []})
+    labels = [
+        datetime.fromtimestamp(ts / 1000).strftime("%d.%m %H:%M")
+        for ts in df["timestamp"].tolist()
+    ]
+    return jsonify({
+        "labels": labels,
+        "close": [round(float(v), 4) for v in df["close"].tolist()],
+        "high":  [round(float(v), 4) for v in df["high"].tolist()],
+        "low":   [round(float(v), 4) for v in df["low"].tolist()],
+    })
+
+
+# -------------------------------------------------------
+# API — Reset portfolio
+# -------------------------------------------------------
+@app.route("/api/paper/reset", methods=["POST"])
+@login_required
+def api_paper_reset():
+    try:
+        count = reset_trades()
+        logger.info("Portfolio reset: %d trades deleted", count)
+        return jsonify({"ok": True, "deleted": count})
+    except Exception as e:
+        logger.error("reset_trades failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)})
 
 
 # -------------------------------------------------------
