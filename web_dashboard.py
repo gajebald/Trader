@@ -55,65 +55,40 @@ _LOGIN_TEMPLATE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IOTA Trading Bot — Login</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0f1117;
-      color: #e2e8f0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .login-box {
-      background: #1e2330;
-      border: 1px solid #2d3748;
-      border-radius: 14px;
-      padding: 40px 36px;
-      width: 100%;
-      max-width: 360px;
-      text-align: center;
-    }
-    h1 { font-size: 1.3rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }
-    .subtitle { font-size: 0.8rem; color: #64748b; margin-bottom: 28px; }
-    input[type=password] {
-      width: 100%;
-      padding: 11px 14px;
-      background: #161b27;
-      border: 1px solid #2d3748;
-      border-radius: 8px;
-      color: #e2e8f0;
-      font-size: 0.95rem;
-      outline: none;
-      margin-bottom: 14px;
-    }
-    input[type=password]:focus { border-color: #38bdf8; }
-    button {
-      width: 100%;
-      padding: 11px;
-      background: #38bdf8;
-      color: #0f1117;
-      font-weight: 700;
-      font-size: 0.95rem;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-    }
-    button:hover { background: #7dd3fc; }
-    .error { color: #f87171; font-size: 0.82rem; margin-bottom: 12px; }
-  </style>
+  <title>Admin Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <div class="login-box">
-    <h1>Admin Login</h1>
-    <p class="subtitle">Bitte anmelden um fortzufahren</p>
-    {% if error %}<div class="error">{{ error }}</div>{% endif %}
-    <form method="post">
-      <input type="password" name="password" placeholder="Passwort" autofocus>
-      <button type="submit">Anmelden</button>
-    </form>
+<body class="bg-slate-950 min-h-screen flex items-center justify-center px-4">
+  <div class="w-full max-w-sm">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-sky-900/40 border border-sky-800 mb-4">
+          <svg class="w-6 h-6 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+          </svg>
+        </div>
+        <h1 class="text-xl font-bold text-white">Admin Login</h1>
+        <p class="text-sm text-slate-500 mt-1">Bitte anmelden um fortzufahren</p>
+      </div>
+      {% if error %}
+      <div class="mb-4 px-4 py-2.5 rounded-lg bg-red-950/50 border border-red-900 text-red-400 text-sm text-center">
+        {{ error }}
+      </div>
+      {% endif %}
+      <form method="post" class="space-y-4">
+        <input type="password" name="password" placeholder="Passwort" autofocus
+               class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-slate-200
+                      placeholder-slate-600 focus:outline-none focus:border-sky-500 focus:ring-1
+                      focus:ring-sky-500 transition-colors text-sm">
+        <button type="submit"
+                class="w-full bg-sky-600 hover:bg-sky-500 text-white font-semibold py-3 rounded-xl
+                       transition-colors text-sm">
+          Anmelden
+        </button>
+      </form>
+    </div>
+    <p class="text-center text-slate-700 text-xs mt-6">IOTA Trading Bot &mdash; Paper Trading Only</p>
   </div>
 </body>
 </html>"""
@@ -127,671 +102,766 @@ _TEMPLATE = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="refresh" content="{{ refresh }}">
   <title>IOTA Trading Bot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      safelist: [
+        'text-emerald-400','text-amber-400','text-red-400','text-sky-400','text-slate-400',
+        'bg-emerald-400','bg-amber-400','bg-red-400','bg-sky-400','bg-slate-500','bg-slate-600',
+        'border-sky-400','animate-pulse',
+        'bg-emerald-900/40','bg-red-900/40','bg-violet-900/40',
+        'border-emerald-900','border-red-900','border-violet-900',
+        'text-violet-400',
+      ]
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js/dist/chart.umd.min.js"></script>
+  <script>
+  function dashboard() {
+    return {
+      activeTab: 'signals',
+      collector:   { running: null },
+      trader:      { running: null },
+      training:    { running: null, model_ready: false },
+      history:     { running: null },
+      paper:       { loading: false },
+      paperLog:    '',
+      historyLog:  '',
+      trainingLog: '',
+
+      init() {
+        this.pollAll();
+        setInterval(() => this.pollAll(), 10000);
+        setTimeout(() => this.initChart(), 200);
+      },
+
+      async pollAll() {
+        await Promise.all([
+          this.pollCollector(),
+          this.pollTrader(),
+          this.pollTraining(),
+          this.pollHistory(),
+        ]);
+      },
+
+      async pollCollector() {
+        try {
+          const d = await fetch('/api/collector/status').then(r => r.json());
+          this.collector.running = d.running;
+        } catch { this.collector.running = null; }
+      },
+
+      async pollTrader() {
+        try {
+          const d = await fetch('/api/trader/status').then(r => r.json());
+          this.trader.running = d.running;
+        } catch { this.trader.running = null; }
+      },
+
+      async pollTraining() {
+        try {
+          const d = await fetch('/api/training/status').then(r => r.json());
+          this.training.running = d.running;
+          this.training.model_ready = d.model_ready;
+        } catch { this.training.running = null; }
+      },
+
+      async pollHistory() {
+        try {
+          const d = await fetch('/api/history/status').then(r => r.json());
+          this.history.running = d.running;
+        } catch { this.history.running = null; }
+      },
+
+      async collectorAction(action) {
+        await fetch('/api/collector/' + action, { method: 'POST' });
+        setTimeout(() => this.pollCollector(), 1800);
+      },
+
+      async traderAction(action) {
+        await fetch('/api/trader/' + action, { method: 'POST' });
+        setTimeout(() => this.pollTrader(), 1800);
+      },
+
+      async startHistory() {
+        const tf   = document.getElementById('hist-tf').value;
+        const days = document.getElementById('hist-days').value;
+        this.historyLog = 'Starte Download (' + tf + ', ' + days + ' Tage)…';
+        const d = await fetch('/api/history/start?timeframe=' + tf + '&days=' + days, { method: 'POST' }).then(r => r.json());
+        this.historyLog = d.message || '';
+        await this.pollHistory();
+        const poll = setInterval(async () => {
+          await this.pollHistory();
+          if (!this.history.running) {
+            clearInterval(poll);
+            this.historyLog = '\\u2713 Download abgeschlossen.';
+          }
+        }, 4000);
+      },
+
+      async startTraining() {
+        const tf = document.getElementById('train-tf').value;
+        this.trainingLog = 'Starte Training (' + tf + ')…';
+        const d = await fetch('/api/training/start?timeframe=' + tf, { method: 'POST' }).then(r => r.json());
+        this.trainingLog = d.message || '';
+        await this.pollTraining();
+        const poll = setInterval(async () => {
+          await this.pollTraining();
+          if (!this.training.running) {
+            clearInterval(poll);
+            this.trainingLog = this.training.model_ready
+              ? '\\u2713 Training abgeschlossen — Modell gespeichert.'
+              : '\\u2717 Training beendet (kein Modell gefunden).';
+          }
+        }, 5000);
+      },
+
+      async runPaper() {
+        this.paper.loading = true;
+        this.paperLog = '';
+        try {
+          const d = await fetch('/api/paper/run', { method: 'POST' }).then(r => r.json());
+          this.paperLog = d.output || d.message || '';
+        } catch(e) {
+          this.paperLog = 'Verbindungsfehler: ' + e.message;
+        }
+        this.paper.loading = false;
+      },
+
+      initChart() {
+        const canvas = document.getElementById('loss-chart');
+        if (!canvas) return;
+        const history = {{ history_json | safe }};
+        const losses    = history.loss     || [];
+        const valLosses = history.val_loss || [];
+        if (!losses.length) return;
+        new Chart(canvas, {
+          type: 'line',
+          data: {
+            labels: losses.map((_, i) => i + 1),
+            datasets: [
+              {
+                label: 'Train Loss',
+                data: losses,
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56,189,248,0.08)',
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.35,
+              },
+              {
+                label: 'Val Loss',
+                data: valLosses,
+                borderColor: '#fb923c',
+                backgroundColor: 'rgba(251,146,60,0.08)',
+                borderWidth: 2,
+                pointRadius: 0,
+                tension: 0.35,
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+              legend: { labels: { color: '#94a3b8', boxWidth: 10, font: { size: 11 } } }
+            },
+            scales: {
+              x: {
+                ticks: { color: '#475569', maxTicksLimit: 10, font: { size: 10 } },
+                grid: { color: '#1e293b' },
+                title: { display: true, text: 'Epoche', color: '#475569', font: { size: 10 } }
+              },
+              y: {
+                ticks: { color: '#475569', font: { size: 10 } },
+                grid: { color: '#1e293b' },
+                title: { display: true, text: 'Loss', color: '#475569', font: { size: 10 } }
+              }
+            }
+          }
+        });
+      },
+
+      dotClass(v) {
+        if (v === null) return 'bg-amber-400 animate-pulse';
+        return v ? 'bg-emerald-400' : 'bg-slate-600';
+      },
+      statusText(v) {
+        if (v === null) return 'Prüfe…';
+        return v ? 'Aktiv' : 'Gestoppt';
+      },
+      statusColor(v) {
+        if (v === null) return 'text-amber-400';
+        return v ? 'text-emerald-400' : 'text-slate-400';
+      }
+    }
+  }
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0f1117;
-      color: #e2e8f0;
-      min-height: 100vh;
-      padding: 24px 16px;
-    }
-    .header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; }
-    h1 { font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
-    .subtitle { color: #64748b; font-size: 0.85rem; }
-    .subtitle .updated { color: #38bdf8; }
-    .logout-btn {
-      padding: 7px 16px;
-      background: #1e2330;
-      border: 1px solid #2d3748;
-      border-radius: 8px;
-      color: #94a3b8;
-      font-size: 0.8rem;
-      cursor: pointer;
-      text-decoration: none;
-      white-space: nowrap;
-    }
-    .logout-btn:hover { border-color: #f87171; color: #f87171; }
-
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
-    .card {
-      background: #1e2330;
-      border: 1px solid #2d3748;
-      border-radius: 10px;
-      padding: 16px;
-    }
-    .card-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: #64748b; margin-bottom: 6px; }
-    .card-value { font-size: 1.35rem; font-weight: 700; }
-    .card-value.green  { color: #4ade80; }
-    .card-value.red    { color: #f87171; }
-    .card-value.yellow { color: #facc15; }
-    .card-value.blue   { color: #38bdf8; }
-    .card-value.gray   { color: #94a3b8; }
-
-    .section-title {
-      font-size: 0.85rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      color: #64748b;
-      margin-bottom: 12px;
-    }
-    .panel { background: #1e2330; border: 1px solid #2d3748; border-radius: 10px; padding: 18px; margin-bottom: 28px; }
-
-    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-    th { text-align: left; padding: 8px 10px; color: #64748b; font-weight: 600;
-         border-bottom: 1px solid #2d3748; text-transform: uppercase; font-size: 0.72rem; letter-spacing: .06em; }
-    td { padding: 9px 10px; border-bottom: 1px solid #1a2033; }
-    tr:last-child td { border-bottom: none; }
-    tr:hover td { background: #232a3b; }
-    .buy  { color: #4ade80; font-weight: 700; }
-    .sell { color: #f87171; font-weight: 700; }
-    .hold { color: #94a3b8; }
-    .pos  { color: #4ade80; }
-    .neg  { color: #f87171; }
-
-    .signals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-    .sig { background: #161b27; border-radius: 8px; padding: 10px 14px; }
-    .sig-name  { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: .06em; }
-    .sig-value { font-size: 1rem; font-weight: 600; margin-top: 3px; }
-
-    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-    .dot-green  { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
-    .dot-red    { background: #f87171; }
-    .dot-yellow { background: #facc15; box-shadow: 0 0 6px #facc15; }
-
-    .empty { color: #475569; font-style: italic; text-align: center; padding: 20px; }
-    footer { text-align: center; color: #334155; font-size: 0.75rem; margin-top: 12px; }
-
-    .tf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-    .tf-card { background: #161b27; border-radius: 8px; padding: 12px 14px; }
-    .tf-name { font-size: 0.75rem; color: #38bdf8; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
-    .tf-count { font-size: 1.4rem; font-weight: 700; color: #f8fafc; }
-    .tf-label { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
-    .tf-range { font-size: 0.72rem; color: #475569; margin-top: 6px; border-top: 1px solid #1e2330; padding-top: 6px; }
-
-    /* Steuerung */
-    .ctrl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-    .ctrl-card { background: #161b27; border-radius: 10px; padding: 16px 18px; }
-    .ctrl-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: #64748b; margin-bottom: 10px; }
-    .ctrl-status { font-size: 0.9rem; font-weight: 600; min-height: 22px; margin-bottom: 14px; }
-    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
-    .btn {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 7px;
-      font-size: 0.82rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: opacity .15s;
-    }
-    .btn:hover { opacity: .85; }
-    .btn:disabled { opacity: .4; cursor: default; }
-    .btn-green { background: #166534; color: #4ade80; border: 1px solid #166534; }
-    .btn-red   { background: #7f1d1d; color: #f87171; border: 1px solid #7f1d1d; }
-    .btn-blue  { background: #0c4a6e; color: #38bdf8; border: 1px solid #0c4a6e; }
-    .ctrl-log {
-      margin-top: 10px;
-      font-size: 0.75rem;
-      color: #64748b;
-      font-family: monospace;
-      background: #0f1117;
-      border-radius: 6px;
-      padding: 8px 10px;
-      min-height: 36px;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
+    [x-cloak] { display: none !important; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
   </style>
 </head>
-<body>
+<body class="bg-slate-950 text-slate-200 min-h-screen" x-data="dashboard()" x-init="init()">
 
-<div class="header">
-  <div>
-    <h1>📈 IOTA Trading Bot</h1>
-    <p class="subtitle">
-      Symbol: <strong>{{ symbol }}</strong> &nbsp;|&nbsp;
-      Aktualisierung alle {{ refresh }}s &nbsp;|&nbsp;
-      <span class="updated">{{ now }}</span>
-    </p>
-  </div>
-  <a href="/logout" class="logout-btn">Abmelden</a>
-</div>
-
-<!-- Steuerung -->
-<div class="section-title">Steuerung</div>
-<div class="panel">
-  <div class="ctrl-grid">
-
-    <div class="ctrl-card">
-      <div class="ctrl-title">Datensammler</div>
-      <div class="ctrl-status" id="collector-status">
-        <span class="status-dot dot-yellow"></span>Prüfe…
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-green" onclick="collectorAction('start')">▶ Starten</button>
-        <button class="btn btn-red"   onclick="collectorAction('stop')">■ Stoppen</button>
-      </div>
+<!-- ===== HEADER ===== -->
+<header class="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/70">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-4">
+    <div class="flex-shrink-0">
+      <span class="font-bold text-white text-sm tracking-tight">IOTA Bot</span>
+      <span class="hidden sm:inline text-slate-600 text-xs ml-2">{{ symbol }}</span>
     </div>
 
-    <div class="ctrl-card">
-      <div class="ctrl-title">Trading-Loop</div>
-      <div class="ctrl-status" id="trader-status">
-        <span class="status-dot dot-yellow"></span>Prüfe…
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-green" onclick="traderAction('start')">▶ Starten</button>
-        <button class="btn btn-red"   onclick="traderAction('stop')">■ Stoppen</button>
-      </div>
+    <!-- status pills -->
+    <div class="flex items-center gap-2 flex-1 overflow-x-auto no-scrollbar">
+      <span class="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-full px-2.5 py-1 text-xs whitespace-nowrap">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="dotClass(collector.running)"></span>
+        <span class="text-slate-400">Collector</span>
+        <span class="font-medium" :class="statusColor(collector.running)" x-text="statusText(collector.running)"></span>
+      </span>
+      <span class="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-full px-2.5 py-1 text-xs whitespace-nowrap">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="dotClass(trader.running)"></span>
+        <span class="text-slate-400">Trader</span>
+        <span class="font-medium" :class="statusColor(trader.running)" x-text="statusText(trader.running)"></span>
+      </span>
+      <span class="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-full px-2.5 py-1 text-xs whitespace-nowrap">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              :class="training.running ? 'bg-amber-400 animate-pulse' : (training.model_ready ? 'bg-emerald-400' : 'bg-slate-600')"></span>
+        <span class="text-slate-400">Modell</span>
+        <span class="font-medium"
+              :class="training.running ? 'text-amber-400' : (training.model_ready ? 'text-emerald-400' : 'text-slate-400')"
+              x-text="training.running ? 'Training…' : (training.model_ready ? 'Bereit' : 'Fehlt')"></span>
+      </span>
+      <span class="text-slate-700 text-xs hidden sm:inline ml-auto">{{ now }}</span>
     </div>
 
-    <div class="ctrl-card">
-      <div class="ctrl-title">Historische Daten</div>
-      <div class="ctrl-status" id="history-status">
-        <span class="status-dot dot-yellow"></span>Prüfe…
-      </div>
-      <div class="btn-row" style="align-items:center;flex-wrap:wrap;gap:6px">
-        <select id="history-tf" style="padding:7px 10px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:0.82rem">
-          <option value="1h">1h</option>
-          <option value="5m">5m</option>
-          <option value="1m">1m</option>
-        </select>
-        <input id="history-days" type="number" value="365" min="1" max="1825"
-               style="width:68px;padding:7px 8px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:0.82rem">
-        <span style="font-size:0.75rem;color:#64748b">Tage</span>
-        <button class="btn btn-blue" id="history-btn" onclick="startHistory()">📥 Laden</button>
-      </div>
-      <div class="ctrl-log" id="history-log"></div>
-    </div>
+    <a href="/logout"
+       class="flex-shrink-0 text-xs text-slate-500 hover:text-red-400 border border-slate-800 hover:border-red-900/60
+              rounded-lg px-3 py-1.5 transition-colors whitespace-nowrap">
+      Abmelden
+    </a>
+  </div>
+</header>
 
-    <div class="ctrl-card">
-      <div class="ctrl-title">Modell-Training</div>
-      <div class="ctrl-status" id="training-status">
-        <span class="status-dot dot-yellow"></span>Prüfe…
-      </div>
-      <div class="btn-row" style="align-items:center">
-        <select id="training-tf" style="padding:7px 10px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:0.82rem;">
-          <option value="1h">1h</option>
-          <option value="5m">5m</option>
-          <option value="1m">1m</option>
-        </select>
-        <button class="btn btn-blue" id="training-btn" onclick="startTraining()">🧠 Training starten</button>
-      </div>
-      <div class="ctrl-log" id="training-log"></div>
-    </div>
+<main class="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-8">
 
-    <div class="ctrl-card">
-      <div class="ctrl-title">Paper Trader (einmalig)</div>
-      <div class="ctrl-status" id="paper-status" style="color:#64748b">—</div>
-      <div class="btn-row">
-        <button class="btn btn-blue" id="paper-btn" onclick="runPaper()">⚡ Iteration ausführen</button>
+  <!-- ===== PORTFOLIO ===== -->
+  <section>
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Portfolio</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-3">
+
+      <div class="col-span-2 bg-gradient-to-br from-sky-900/30 to-slate-900 border border-sky-800/40 rounded-2xl p-5">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1">Portfolio-Wert</div>
+        <div class="text-3xl font-bold text-sky-400">${{ status.portfolio_value }}</div>
+        <div class="text-xs text-slate-600 mt-1.5">Startkapital: ${{ "%.2f"|format(start_capital) }}</div>
       </div>
-      <div class="ctrl-log" id="paper-log"></div>
-    </div>
 
-  </div>
-</div>
-
-<!-- Portfolio-Karten -->
-<div class="grid">
-  <div class="card">
-    <div class="card-label">Portfolio-Wert</div>
-    <div class="card-value blue">${{ status.portfolio_value }}</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Startkapital</div>
-    <div class="card-value gray">${{ "%.2f"|format(start_capital) }}</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Kassenstand</div>
-    <div class="card-value">${{ status.cash }}</div>
-  </div>
-  <div class="card">
-    <div class="card-label">IOTA-Bestand</div>
-    <div class="card-value">{{ status.iota_holdings }} IOTA</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Realisierter PnL</div>
-    <div class="card-value {{ 'green' if status.realized_pnl >= 0 else 'red' }}">
-      {{ '+' if status.realized_pnl >= 0 else '' }}${{ status.realized_pnl }}
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-label">Unrealisierter PnL</div>
-    <div class="card-value {{ 'green' if status.unrealized_pnl >= 0 else 'red' }}">
-      {{ '+' if status.unrealized_pnl >= 0 else '' }}${{ status.unrealized_pnl }}
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-label">Aktueller Preis</div>
-    <div class="card-value yellow">${{ status.current_price }}</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Trades gesamt</div>
-    <div class="card-value">{{ status.trade_count }}</div>
-  </div>
-</div>
-
-<!-- Position & Modell -->
-<div class="grid" style="margin-bottom:28px">
-  <div class="card">
-    <div class="card-label">Offene Position</div>
-    <div class="card-value {{ 'green' if position else 'gray' }}">
-      {% if position %}
-        <span class="status-dot dot-green"></span>OPEN @ ${{ "%.4f"|format(position.price) }}
-      {% else %}
-        <span class="status-dot dot-red"></span>Keine
-      {% endif %}
-    </div>
-  </div>
-  <div class="card">
-    <div class="card-label">Keras-Modell</div>
-    <div class="card-value {{ 'green' if model_ready else 'yellow' }}">
-      {% if model_ready %}
-        <span class="status-dot dot-green"></span>Bereit
-      {% else %}
-        <span class="status-dot dot-yellow"></span>Nicht trainiert
-      {% endif %}
-    </div>
-  </div>
-</div>
-
-<!-- Gesammelte Daten -->
-<div class="section-title">Gesammelte Daten</div>
-<div class="panel">
-  <div class="tf-grid">
-    <div class="tf-card">
-      <div class="tf-name">Ticker</div>
-      <div class="tf-count">{{ stats.ticker_count }}</div>
-      <div class="tf-label">Einträge gesamt</div>
-      {% if stats.latest_ticker_ts %}
-      <div class="tf-range">Letzter: {{ stats.latest_ticker_ts | ts }}</div>
-      {% endif %}
-    </div>
-    {% for tf, d in stats.timeframes.items() %}
-    <div class="tf-card">
-      <div class="tf-name">{{ tf }} Candles</div>
-      <div class="tf-count {{ 'green' if d.count >= 100 else ('yellow' if d.count > 0 else 'gray') }}">
-        {{ d.count }}
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Cash</div>
+        <div class="text-xl font-bold text-slate-100">${{ status.cash }}</div>
       </div>
-      <div class="tf-label">
-        {% if d.count >= 100 %}ausreichend für Training
-        {% elif d.count > 0 %}zu wenig für Training (min. 100)
-        {% else %}noch keine Daten
-        {% endif %}
-      </div>
-      {% if d.first_ts and d.last_ts %}
-      <div class="tf-range">
-        {{ d.first_ts | ts }} –<br>{{ d.last_ts | ts }}
-      </div>
-      {% endif %}
-    </div>
-    {% endfor %}
-  </div>
-</div>
 
-<!-- Trainingsdaten -->
-<div class="section-title">Trainingsdaten</div>
-<div class="panel">
-  <table>
-    <thead>
-      <tr>
-        <th>Zeitrahmen</th>
-        <th>Candles</th>
-        <th>Saubere Zeilen</th>
-        <th>Sequenzen</th>
-        <th>HOLD</th>
-        <th>BUY</th>
-        <th>SELL</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for tf, d in training_stats.items() %}
-      <tr>
-        <td style="color:#38bdf8;font-weight:700">{{ tf }}</td>
-        <td>{{ d.candles }}</td>
-        <td>{{ d.clean_rows }}</td>
-        <td>{{ d.sequences }}</td>
-        <td class="hold">{{ d.hold }}</td>
-        <td class="buy">{{ d.buy }}</td>
-        <td class="sell">{{ d.sell }}</td>
-        <td>
-          {% if d.ready %}
-            <span class="status-dot dot-green"></span><span style="color:#4ade80">Bereit</span>
-          {% elif d.sequences > 0 %}
-            <span class="status-dot dot-yellow"></span><span style="color:#facc15">Zu wenig (min. {{ min_samples }})</span>
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">IOTA-Bestand</div>
+        <div class="text-xl font-bold text-slate-100">{{ status.iota_holdings }}</div>
+        <div class="text-xs text-slate-600 mt-1">IOTA</div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Real. PnL</div>
+        <div class="text-xl font-bold {{ 'text-emerald-400' if status.realized_pnl >= 0 else 'text-red-400' }}">
+          {{ '+' if status.realized_pnl >= 0 else '' }}${{ status.realized_pnl }}
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Unreal. PnL</div>
+        <div class="text-xl font-bold {{ 'text-emerald-400' if status.unrealized_pnl >= 0 else 'text-red-400' }}">
+          {{ '+' if status.unrealized_pnl >= 0 else '' }}${{ status.unrealized_pnl }}
+        </div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Preis</div>
+        <div class="text-xl font-bold text-amber-400">${{ status.current_price }}</div>
+      </div>
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+        <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Trades / Position</div>
+        <div class="text-xl font-bold text-slate-100">{{ status.trade_count }}</div>
+        <div class="text-xs mt-1.5 {{ 'text-emerald-400' if position else 'text-slate-600' }}">
+          {% if position %}
+            &#9679; OFFEN @ ${{ "%.4f"|format(position.price) }}
           {% else %}
-            <span class="status-dot dot-red"></span><span style="color:#f87171">Keine Daten</span>
+            Keine Position
           {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  <div style="margin-top:12px;font-size:0.78rem;color:#475569">
-    Lookback: <strong style="color:#94a3b8">{{ lookback_steps }} Bars</strong> &nbsp;|&nbsp;
-    Lookahead: <strong style="color:#94a3b8">{{ lookahead_bars }} Bars</strong> &nbsp;|&nbsp;
-    Schwelle: <strong style="color:#94a3b8">±{{ "%.1f"|format(label_threshold_pct * 100) }}%</strong>
-    &nbsp;|&nbsp;
-    Training starten:
-    <code style="color:#38bdf8;background:#161b27;padding:2px 6px;border-radius:4px">python main.py train --timeframe 1h</code>
-  </div>
-</div>
+        </div>
+      </div>
 
-<!-- Modell-Metriken -->
-<div class="section-title">Modell-Metriken</div>
-<div class="panel">
-  {% if metrics %}
-  <div class="grid" style="margin-bottom:16px">
-    <div class="card">
-      <div class="card-label">Val Loss</div>
-      <div class="card-value {{ 'green' if metrics.val_loss < 1.0 else ('yellow' if metrics.val_loss < 1.2 else 'red') }}">
-        {{ "%.4f"|format(metrics.val_loss) }}
+    </div>
+  </section>
+
+  <!-- ===== STEUERUNG ===== -->
+  <section>
+    <h2 class="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-3">Steuerung</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+
+      <!-- Collector -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Datensammler</div>
+        <div class="flex items-center gap-2 mb-4 h-6">
+          <span class="w-2 h-2 rounded-full flex-shrink-0 transition-colors" :class="dotClass(collector.running)"></span>
+          <span class="text-sm font-medium transition-colors" :class="statusColor(collector.running)" x-text="statusText(collector.running)"></span>
+        </div>
+        <div class="flex gap-2">
+          <button @click="collectorAction('start')"
+                  :disabled="collector.running === true"
+                  class="flex-1 py-2 text-xs font-semibold rounded-xl bg-emerald-900/40 text-emerald-400
+                         border border-emerald-900 hover:bg-emerald-900/70 disabled:opacity-30
+                         disabled:cursor-not-allowed transition-all">
+            ▶ Start
+          </button>
+          <button @click="collectorAction('stop')"
+                  :disabled="collector.running !== true"
+                  class="flex-1 py-2 text-xs font-semibold rounded-xl bg-red-900/40 text-red-400
+                         border border-red-900 hover:bg-red-900/70 disabled:opacity-30
+                         disabled:cursor-not-allowed transition-all">
+            ■ Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Trader -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Trading-Loop</div>
+        <div class="flex items-center gap-2 mb-4 h-6">
+          <span class="w-2 h-2 rounded-full flex-shrink-0 transition-colors" :class="dotClass(trader.running)"></span>
+          <span class="text-sm font-medium transition-colors" :class="statusColor(trader.running)" x-text="statusText(trader.running)"></span>
+        </div>
+        <div class="flex gap-2">
+          <button @click="traderAction('start')"
+                  :disabled="trader.running === true"
+                  class="flex-1 py-2 text-xs font-semibold rounded-xl bg-emerald-900/40 text-emerald-400
+                         border border-emerald-900 hover:bg-emerald-900/70 disabled:opacity-30
+                         disabled:cursor-not-allowed transition-all">
+            ▶ Start
+          </button>
+          <button @click="traderAction('stop')"
+                  :disabled="trader.running !== true"
+                  class="flex-1 py-2 text-xs font-semibold rounded-xl bg-red-900/40 text-red-400
+                         border border-red-900 hover:bg-red-900/70 disabled:opacity-30
+                         disabled:cursor-not-allowed transition-all">
+            ■ Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- Paper Trader -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Paper Trader</div>
+        <div class="text-xs text-slate-500 mb-4 h-6 flex items-center">Einmalige Iteration ausführen</div>
+        <button @click="runPaper()"
+                :disabled="paper.loading"
+                class="w-full py-2 text-xs font-semibold rounded-xl bg-sky-900/40 text-sky-400
+                       border border-sky-900 hover:bg-sky-900/70 disabled:opacity-30
+                       disabled:cursor-not-allowed transition-all flex items-center justify-center gap-1.5">
+          <span x-show="!paper.loading">&#9889; Ausführen</span>
+          <span x-show="paper.loading" class="flex items-center gap-1.5">
+            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            Läuft…
+          </span>
+        </button>
+        <div x-show="paperLog" x-text="paperLog"
+             class="mt-2 text-xs text-slate-500 font-mono bg-slate-950 rounded-lg p-2
+                    whitespace-pre-wrap break-all max-h-24 overflow-y-auto leading-relaxed"></div>
+      </div>
+
+      <!-- Historical download -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Historische Daten</div>
+        <div class="flex items-center gap-2 mb-3 h-6">
+          <span class="w-2 h-2 rounded-full flex-shrink-0"
+                :class="history.running ? 'bg-amber-400 animate-pulse' : 'bg-slate-600'"></span>
+          <span class="text-sm"
+                :class="history.running ? 'text-amber-400' : 'text-slate-400'"
+                x-text="history.running ? 'Lädt…' : 'Bereit'"></span>
+        </div>
+        <div class="flex gap-2 mb-2">
+          <select id="hist-tf"
+                  class="flex-1 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-300
+                         px-2 py-1.5 focus:outline-none focus:border-sky-600 transition-colors">
+            <option value="1h">1h</option>
+            <option value="5m">5m</option>
+            <option value="1m">1m</option>
+          </select>
+          <input id="hist-days" type="number" value="365" min="1" max="1825"
+                 class="w-16 bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-300
+                        px-2 py-1.5 focus:outline-none focus:border-sky-600 transition-colors text-center">
+          <span class="text-xs text-slate-600 self-center">d</span>
+        </div>
+        <button @click="startHistory()"
+                :disabled="history.running"
+                class="w-full py-2 text-xs font-semibold rounded-xl bg-sky-900/40 text-sky-400
+                       border border-sky-900 hover:bg-sky-900/70 disabled:opacity-30
+                       disabled:cursor-not-allowed transition-all">
+          &#128229; Laden
+        </button>
+        <div x-show="historyLog" x-text="historyLog"
+             class="mt-2 text-xs text-slate-500 font-mono bg-slate-950 rounded-lg p-2"></div>
+      </div>
+
+      <!-- Training -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Modell-Training</div>
+        <div class="flex items-center gap-2 mb-3 h-6">
+          <span class="w-2 h-2 rounded-full flex-shrink-0"
+                :class="training.running ? 'bg-amber-400 animate-pulse' : (training.model_ready ? 'bg-emerald-400' : 'bg-slate-600')"></span>
+          <span class="text-sm font-medium"
+                :class="training.running ? 'text-amber-400' : (training.model_ready ? 'text-emerald-400' : 'text-slate-400')"
+                x-text="training.running ? 'Läuft…' : (training.model_ready ? 'Modell bereit' : 'Kein Modell')"></span>
+        </div>
+        <select id="train-tf"
+                class="w-full bg-slate-950 border border-slate-700 rounded-lg text-xs text-slate-300
+                       px-2 py-1.5 mb-2 focus:outline-none focus:border-sky-600 transition-colors">
+          <option value="1h">1h</option>
+          <option value="5m">5m</option>
+          <option value="1m">1m</option>
+        </select>
+        <button @click="startTraining()"
+                :disabled="training.running"
+                class="w-full py-2 text-xs font-semibold rounded-xl bg-violet-900/40 text-violet-400
+                       border border-violet-900 hover:bg-violet-900/70 disabled:opacity-30
+                       disabled:cursor-not-allowed transition-all">
+          &#129504; Training starten
+        </button>
+        <div x-show="trainingLog" x-text="trainingLog"
+             class="mt-2 text-xs text-slate-500 font-mono bg-slate-950 rounded-lg p-2"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ===== TABS ===== -->
+  <section>
+    <!-- Tab bar -->
+    <div class="flex gap-0 border-b border-slate-800 mb-5 -mx-1">
+      <button @click="activeTab = 'signals'"
+              :class="activeTab === 'signals'
+                ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
+                : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+        Signale
+      </button>
+      <button @click="activeTab = 'model'"
+              :class="activeTab === 'model'
+                ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
+                : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+        Modell
+      </button>
+      <button @click="activeTab = 'data'"
+              :class="activeTab === 'data'
+                ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
+                : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+        Daten
+      </button>
+      <button @click="activeTab = 'trades'"
+              :class="activeTab === 'trades'
+                ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
+                : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+        Trades
+        {% if trades %}<span class="ml-1.5 bg-slate-800 text-slate-400 text-xs rounded-full px-1.5 py-0.5">{{ trades|length }}</span>{% endif %}
+      </button>
+    </div>
+
+    <!-- ── Tab: Signale ── -->
+    <div x-show="activeTab === 'signals'" x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+      {% if signals %}
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">Preis</div>
+          <div class="text-xl font-bold text-amber-400">${{ "%.4f"|format(signals.last_price) if signals.last_price else '—' }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">RSI 14</div>
+          <div class="text-xl font-bold {{ 'text-red-400' if signals.rsi and signals.rsi > 70 else ('text-emerald-400' if signals.rsi and signals.rsi < 30 else 'text-slate-100') }}">
+            {{ "%.1f"|format(signals.rsi) if signals.rsi else '—' }}
+          </div>
+          {% if signals.rsi %}
+          <div class="mt-2 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+            <div class="h-full rounded-full transition-all {{ 'bg-red-400' if signals.rsi > 70 else ('bg-emerald-400' if signals.rsi < 30 else 'bg-sky-400') }}"
+                 style="width: {{ [signals.rsi, 100]|min }}%"></div>
+          </div>
+          {% endif %}
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">SMA 20</div>
+          <div class="text-xl font-bold text-slate-100">${{ "%.4f"|format(signals.sma_20) if signals.sma_20 else '—' }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">SMA 50</div>
+          <div class="text-xl font-bold text-slate-100">${{ "%.4f"|format(signals.sma_50) if signals.sma_50 else '—' }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">EMA 20</div>
+          <div class="text-xl font-bold text-slate-100">${{ "%.4f"|format(signals.ema_20) if signals.ema_20 else '—' }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">MACD</div>
+          <div class="text-xl font-bold {{ 'text-emerald-400' if signals.macd and signals.macd > 0 else 'text-red-400' }}">
+            {{ "%.5f"|format(signals.macd) if signals.macd else '—' }}
+          </div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">MACD Signal</div>
+          <div class="text-xl font-bold text-slate-100">{{ "%.5f"|format(signals.macd_signal) if signals.macd_signal else '—' }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">Volatilität</div>
+          <div class="text-xl font-bold text-slate-100">{{ "%.5f"|format(signals.volatility) if signals.volatility else '—' }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">Änderung %</div>
+          <div class="text-xl font-bold {{ 'text-emerald-400' if signals.pct_change and signals.pct_change > 0 else 'text-red-400' }}">
+            {{ '%+.3f%%'|format(signals.pct_change * 100) if signals.pct_change else '—' }}
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-slate-600 mt-3">Zeitrahmen: 5m &bull; Aktualisierung alle {{ refresh }}s</p>
+      {% else %}
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+        <div class="text-3xl mb-3">📡</div>
+        <p class="text-slate-500 text-sm">Noch keine Signaldaten — bitte zuerst den Datensammler starten.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- ── Tab: Modell ── -->
+    <div x-show="activeTab === 'model'" x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+      {% if metrics %}
+      <!-- Metric cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Val Loss</div>
+          <div class="text-2xl font-bold {{ 'text-emerald-400' if metrics.val_loss < 1.0 else ('text-amber-400' if metrics.val_loss < 1.2 else 'text-red-400') }}">
+            {{ "%.4f"|format(metrics.val_loss) }}
+          </div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Val Accuracy</div>
+          <div class="text-2xl font-bold {{ 'text-emerald-400' if metrics.val_accuracy >= 0.45 else ('text-amber-400' if metrics.val_accuracy >= 0.35 else 'text-red-400') }}">
+            {{ "%.1f"|format(metrics.val_accuracy * 100) }}%
+          </div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Epochen</div>
+          <div class="text-2xl font-bold text-slate-300">{{ metrics.epochs_ran }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Zeitrahmen</div>
+          <div class="text-2xl font-bold text-sky-400">{{ metrics.timeframe }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Train-Samples</div>
+          <div class="text-2xl font-bold text-slate-300">{{ metrics.train_samples }}</div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Val-Samples</div>
+          <div class="text-2xl font-bold text-slate-300">{{ metrics.val_samples }}</div>
+        </div>
+      </div>
+      {% if metrics.class_weights %}
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3 mb-5 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <span class="text-xs text-slate-500">Klassen-Gewichte</span>
+        <span class="text-xs"><span class="text-slate-500">HOLD</span> <span class="font-mono font-semibold text-slate-300">{{ metrics.class_weights.HOLD }}</span></span>
+        <span class="text-xs"><span class="text-slate-500">BUY</span> <span class="font-mono font-semibold text-emerald-400">{{ metrics.class_weights.BUY }}</span></span>
+        <span class="text-xs"><span class="text-slate-500">SELL</span> <span class="font-mono font-semibold text-red-400">{{ metrics.class_weights.SELL }}</span></span>
+        <span class="text-xs text-slate-600 ml-auto">Trainiert: <span class="text-sky-500">{{ metrics.trained_at }}</span></span>
+      </div>
+      {% endif %}
+      <!-- Loss chart -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-4">Loss-Kurve</div>
+        <div style="height: 220px; position: relative;">
+          <canvas id="loss-chart"></canvas>
+        </div>
+      </div>
+      {% else %}
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+        <div class="text-3xl mb-3">🧠</div>
+        <p class="text-slate-500 text-sm">Noch kein Modell trainiert — Training über den Button in der Steuerung starten.</p>
+      </div>
+      {% endif %}
+
+      <!-- Training stats table -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden mt-5">
+        <div class="px-5 py-4 border-b border-slate-800">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Trainingsdaten</span>
+          <span class="text-xs text-slate-600 ml-4">
+            Lookback: <span class="text-slate-400">{{ lookback_steps }}</span> &bull;
+            Lookahead: <span class="text-slate-400">{{ lookahead_bars }}</span> &bull;
+            Schwelle: <span class="text-slate-400">&#177;{{ "%.1f"|format(label_threshold_pct * 100) }}%</span>
+          </span>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                <th class="text-left px-5 py-3">TF</th>
+                <th class="text-right px-4 py-3">Candles</th>
+                <th class="text-right px-4 py-3">Clean</th>
+                <th class="text-right px-4 py-3">Seqs</th>
+                <th class="text-right px-4 py-3 text-slate-400">HOLD</th>
+                <th class="text-right px-4 py-3 text-emerald-600">BUY</th>
+                <th class="text-right px-4 py-3 text-red-600">SELL</th>
+                <th class="text-left px-5 py-3">Status</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/50">
+              {% for tf, d in training_stats.items() %}
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="px-5 py-3.5 font-bold text-sky-400">{{ tf }}</td>
+                <td class="px-4 py-3.5 text-right text-slate-300 font-mono text-xs">{{ d.candles }}</td>
+                <td class="px-4 py-3.5 text-right text-slate-300 font-mono text-xs">{{ d.clean_rows }}</td>
+                <td class="px-4 py-3.5 text-right text-slate-300 font-mono text-xs">{{ d.sequences }}</td>
+                <td class="px-4 py-3.5 text-right text-slate-400 font-mono text-xs">{{ d.hold }}</td>
+                <td class="px-4 py-3.5 text-right text-emerald-400 font-mono text-xs">{{ d.buy }}</td>
+                <td class="px-4 py-3.5 text-right text-red-400 font-mono text-xs">{{ d.sell }}</td>
+                <td class="px-5 py-3.5">
+                  {% if d.ready %}
+                  <span class="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-400">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>Bereit
+                  </span>
+                  {% elif d.sequences > 0 %}
+                  <span class="inline-flex items-center gap-1.5 text-xs font-medium text-amber-400">
+                    <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Zu wenig (min. {{ min_samples }})
+                  </span>
+                  {% else %}
+                  <span class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                    <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span>Keine Daten
+                  </span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-label">Val Accuracy</div>
-      <div class="card-value {{ 'green' if metrics.val_accuracy >= 0.45 else ('yellow' if metrics.val_accuracy >= 0.35 else 'red') }}">
-        {{ "%.1f"|format(metrics.val_accuracy * 100) }}%
+
+    <!-- ── Tab: Daten ── -->
+    <div x-show="activeTab === 'data'" x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+
+        <!-- Ticker -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <div class="text-xs font-bold uppercase tracking-wider text-sky-500 mb-3">Ticker</div>
+          <div class="text-3xl font-bold text-slate-100">{{ stats.ticker_count }}</div>
+          <div class="text-xs text-slate-500 mt-1">Einträge gesamt</div>
+          {% if stats.latest_ticker_ts %}
+          <div class="text-xs text-slate-600 mt-3 pt-3 border-t border-slate-800">
+            Letzter: {{ stats.latest_ticker_ts | ts }}
+          </div>
+          {% endif %}
+        </div>
+
+        {% for tf, d in stats.timeframes.items() %}
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+          <div class="text-xs font-bold uppercase tracking-wider text-sky-500 mb-3">{{ tf }} Candles</div>
+          <div class="text-3xl font-bold {{ 'text-emerald-400' if d.count >= 100 else ('text-amber-400' if d.count > 0 else 'text-slate-600') }}">
+            {{ d.count }}
+          </div>
+          <div class="text-xs mt-1 {{ 'text-emerald-600' if d.count >= 100 else ('text-amber-600' if d.count > 0 else 'text-slate-600') }}">
+            {% if d.count >= 100 %}Ausreichend für Training
+            {% elif d.count > 0 %}Zu wenig (min. 100)
+            {% else %}Noch keine Daten
+            {% endif %}
+          </div>
+          {% if d.first_ts and d.last_ts %}
+          <div class="text-xs text-slate-600 mt-3 pt-3 border-t border-slate-800 space-y-0.5">
+            <div>{{ d.first_ts | ts }}</div>
+            <div>→ {{ d.last_ts | ts }}</div>
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+
       </div>
     </div>
-    <div class="card">
-      <div class="card-label">Epochen</div>
-      <div class="card-value gray">{{ metrics.epochs_ran }}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Zeitrahmen</div>
-      <div class="card-value blue">{{ metrics.timeframe }}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Train-Samples</div>
-      <div class="card-value gray">{{ metrics.train_samples }}</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Val-Samples</div>
-      <div class="card-value gray">{{ metrics.val_samples }}</div>
-    </div>
-  </div>
-  {% if metrics.class_weights %}
-  <div style="font-size:0.8rem;color:#64748b;margin-bottom:14px">
-    Klassen-Gewichte: &nbsp;
-    <span style="color:#94a3b8">HOLD={{ metrics.class_weights.HOLD }}</span> &nbsp;
-    <span style="color:#4ade80">BUY={{ metrics.class_weights.BUY }}</span> &nbsp;
-    <span style="color:#f87171">SELL={{ metrics.class_weights.SELL }}</span>
-    &nbsp;|&nbsp; Trainiert: <span style="color:#38bdf8">{{ metrics.trained_at }}</span>
-  </div>
-  {% endif %}
-  {{ loss_chart | safe }}
-  {% else %}
-  <div class="empty">Noch kein Modell trainiert — Training über den Button starten.</div>
-  {% endif %}
-</div>
 
-<!-- Technische Signale -->
-<div class="section-title">Technische Signale (5m)</div>
-<div class="panel">
-  {% if signals %}
-  <div class="signals-grid">
-    <div class="sig">
-      <div class="sig-name">Preis</div>
-      <div class="sig-value yellow">${{ "%.4f"|format(signals.last_price) if signals.last_price else '—' }}</div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">RSI 14</div>
-      <div class="sig-value {{ 'red' if signals.rsi and signals.rsi > 70 else ('green' if signals.rsi and signals.rsi < 30 else '') }}">
-        {{ "%.1f"|format(signals.rsi) if signals.rsi else '—' }}
+    <!-- ── Tab: Trades ── -->
+    <div x-show="activeTab === 'trades'" x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+      {% if trades %}
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-xs uppercase tracking-wider text-slate-500 border-b border-slate-800">
+                <th class="text-left px-5 py-3">Zeit</th>
+                <th class="text-left px-4 py-3">Aktion</th>
+                <th class="text-right px-4 py-3">Preis</th>
+                <th class="text-right px-4 py-3">Menge</th>
+                <th class="text-right px-4 py-3">Gebühr</th>
+                <th class="text-right px-4 py-3">PnL</th>
+                <th class="text-right px-4 py-3">Portfolio</th>
+                <th class="text-left px-5 py-3">Grund</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800/50">
+              {% for t in trades %}
+              <tr class="hover:bg-slate-800/30 transition-colors">
+                <td class="px-5 py-3.5 text-slate-500 text-xs font-mono">{{ t.time }}</td>
+                <td class="px-4 py-3.5">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-bold
+                    {{ 'bg-emerald-950 text-emerald-400 border border-emerald-900' if t.action == 'BUY' else ('bg-red-950 text-red-400 border border-red-900' if t.action == 'SELL' else 'bg-slate-800 text-slate-400') }}">
+                    {{ t.action }}
+                  </span>
+                </td>
+                <td class="px-4 py-3.5 text-right text-slate-300 font-mono text-xs">${{ "%.4f"|format(t.price) }}</td>
+                <td class="px-4 py-3.5 text-right text-slate-400 font-mono text-xs">{{ "%.4f"|format(t.quantity) }}</td>
+                <td class="px-4 py-3.5 text-right text-slate-500 font-mono text-xs">${{ "%.4f"|format(t.fee) }}</td>
+                <td class="px-4 py-3.5 text-right font-mono text-xs font-semibold {{ 'text-emerald-400' if t.pnl >= 0 else 'text-red-400' }}">
+                  {{ '+' if t.pnl >= 0 else '' }}${{ "%.4f"|format(t.pnl) }}
+                </td>
+                <td class="px-4 py-3.5 text-right text-slate-300 font-mono text-xs">${{ "%.2f"|format(t.portfolio_value) }}</td>
+                <td class="px-5 py-3.5 text-slate-500 text-xs">{{ t.reason or '—' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">SMA 20</div>
-      <div class="sig-value">${{ "%.4f"|format(signals.sma_20) if signals.sma_20 else '—' }}</div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">SMA 50</div>
-      <div class="sig-value">${{ "%.4f"|format(signals.sma_50) if signals.sma_50 else '—' }}</div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">EMA 20</div>
-      <div class="sig-value">${{ "%.4f"|format(signals.ema_20) if signals.ema_20 else '—' }}</div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">MACD</div>
-      <div class="sig-value {{ 'green' if signals.macd and signals.macd > 0 else 'red' }}">
-        {{ "%.5f"|format(signals.macd) if signals.macd else '—' }}
+      {% else %}
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center">
+        <div class="text-3xl mb-3">📋</div>
+        <p class="text-slate-500 text-sm">Noch keine Trades vorhanden.</p>
       </div>
+      {% endif %}
     </div>
-    <div class="sig">
-      <div class="sig-name">MACD Signal</div>
-      <div class="sig-value">{{ "%.5f"|format(signals.macd_signal) if signals.macd_signal else '—' }}</div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">Volatilität</div>
-      <div class="sig-value">{{ "%.5f"|format(signals.volatility) if signals.volatility else '—' }}</div>
-    </div>
-    <div class="sig">
-      <div class="sig-name">Änderung %</div>
-      <div class="sig-value {{ 'green' if signals.pct_change and signals.pct_change > 0 else 'red' }}">
-        {{ '%+.3f%%'|format(signals.pct_change * 100) if signals.pct_change else '—' }}
-      </div>
-    </div>
-  </div>
-  {% else %}
-  <div class="empty">Noch keine Signaldaten — bitte zuerst den Datensammler starten.</div>
-  {% endif %}
-</div>
 
-<!-- Trade-Historie -->
-<div class="section-title">Trade-Historie (letzte 20)</div>
-<div class="panel">
-  {% if trades %}
-  <table>
-    <thead>
-      <tr>
-        <th>Zeit</th>
-        <th>Aktion</th>
-        <th>Preis</th>
-        <th>Menge</th>
-        <th>Gebühr</th>
-        <th>PnL</th>
-        <th>Portfolio</th>
-        <th>Grund</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for t in trades %}
-      <tr>
-        <td>{{ t.time }}</td>
-        <td class="{{ t.action|lower }}">{{ t.action }}</td>
-        <td>${{ "%.4f"|format(t.price) }}</td>
-        <td>{{ "%.4f"|format(t.quantity) }}</td>
-        <td>${{ "%.4f"|format(t.fee) }}</td>
-        <td class="{{ 'pos' if t.pnl >= 0 else 'neg' }}">
-          {{ '+' if t.pnl >= 0 else '' }}${{ "%.4f"|format(t.pnl) }}
-        </td>
-        <td>${{ "%.2f"|format(t.portfolio_value) }}</td>
-        <td style="color:#64748b;font-size:0.78rem">{{ t.reason or '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-  {% else %}
-  <div class="empty">Noch keine Trades vorhanden.</div>
-  {% endif %}
-</div>
+  </section>
 
-<footer>IOTA Trading Bot &mdash; Paper Trading Only &mdash; Kein Echtgeld</footer>
+</main>
 
-<script>
-function _post(url) {
-  return fetch(url, {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}});
-}
+<footer class="text-center text-slate-700 text-xs py-8">
+  IOTA Trading Bot &mdash; Paper Trading Only &mdash; Kein Echtgeld
+</footer>
 
-// ---- Collector status polling ----
-function updateCollectorStatus() {
-  fetch('/api/collector/status')
-    .then(r => r.json())
-    .then(data => {
-      const el = document.getElementById('collector-status');
-      if (data.running) {
-        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Läuft</span>';
-      } else {
-        el.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Gestoppt</span>';
-      }
-    })
-    .catch(() => {
-      document.getElementById('collector-status').innerHTML =
-        '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Unbekannt</span>';
-    });
-}
-
-function collectorAction(action) {
-  _post('/api/collector/' + action)
-    .then(() => { setTimeout(updateCollectorStatus, 1800); });
-}
-
-// ---- Trader status polling ----
-function updateTraderStatus() {
-  fetch('/api/trader/status')
-    .then(r => r.json())
-    .then(data => {
-      const el = document.getElementById('trader-status');
-      if (data.running) {
-        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Läuft</span>';
-      } else {
-        el.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Gestoppt</span>';
-      }
-    })
-    .catch(() => {
-      document.getElementById('trader-status').innerHTML =
-        '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Unbekannt</span>';
-    });
-}
-
-function traderAction(action) {
-  _post('/api/trader/' + action)
-    .then(() => { setTimeout(updateTraderStatus, 1800); });
-}
-
-// ---- Historical download ----
-function updateHistoryStatus() {
-  fetch('/api/history/status')
-    .then(r => r.json())
-    .then(data => {
-      const el = document.getElementById('history-status');
-      const btn = document.getElementById('history-btn');
-      if (data.running) {
-        el.innerHTML = '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Lädt…</span>';
-        btn.disabled = true;
-      } else {
-        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#94a3b8">Bereit</span>';
-        btn.disabled = false;
-      }
-    });
-}
-
-function startHistory() {
-  const tf   = document.getElementById('history-tf').value;
-  const days = document.getElementById('history-days').value;
-  const logEl = document.getElementById('history-log');
-  logEl.textContent = `Download wird gestartet (${tf}, ${days} Tage)…`;
-  _post(`/api/history/start?timeframe=${tf}&days=${days}`)
-    .then(r => r.json())
-    .then(data => {
-      logEl.textContent = data.message || '';
-      setTimeout(updateHistoryStatus, 2000);
-      const poll = setInterval(() => {
-        fetch('/api/history/status').then(r => r.json()).then(d => {
-          if (!d.running) {
-            clearInterval(poll);
-            updateHistoryStatus();
-            logEl.textContent = '✓ Download abgeschlossen. Trainingsdaten aktualisiert.';
-          }
-        });
-      }, 4000);
-    });
-}
-
-// ---- Training ----
-function updateTrainingStatus() {
-  fetch('/api/training/status')
-    .then(r => r.json())
-    .then(data => {
-      const el = document.getElementById('training-status');
-      const btn = document.getElementById('training-btn');
-      if (data.running) {
-        el.innerHTML = '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Läuft…</span>';
-        btn.disabled = true;
-      } else if (data.model_ready) {
-        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Modell bereit</span>';
-        btn.disabled = false;
-      } else {
-        el.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Kein Modell</span>';
-        btn.disabled = false;
-      }
-    });
-}
-
-function startTraining() {
-  const tf = document.getElementById('training-tf').value;
-  const logEl = document.getElementById('training-log');
-  logEl.textContent = 'Training wird gestartet (' + tf + ')…';
-  _post('/api/training/start?timeframe=' + tf)
-    .then(r => r.json())
-    .then(data => {
-      logEl.textContent = data.message || '';
-      setTimeout(updateTrainingStatus, 2000);
-      // Weiter pollen bis Training fertig
-      const poll = setInterval(() => {
-        fetch('/api/training/status').then(r => r.json()).then(d => {
-          if (!d.running) {
-            clearInterval(poll);
-            updateTrainingStatus();
-            logEl.textContent = d.model_ready ? '✓ Training abgeschlossen — Modell gespeichert.' : '✗ Training beendet (Modell nicht gefunden).';
-          }
-        });
-      }, 5000);
-    });
-}
-
-// ---- Paper trader ----
-function runPaper() {
-  const btn = document.getElementById('paper-btn');
-  const statusEl = document.getElementById('paper-status');
-  const logEl = document.getElementById('paper-log');
-  btn.disabled = true;
-  statusEl.innerHTML = '<span class="status-dot dot-yellow"></span>Wird ausgeführt…';
-  statusEl.style.color = '#facc15';
-  logEl.textContent = '';
-  _post('/api/paper/run')
-    .then(r => r.json())
-    .then(data => {
-      if (data.ok) {
-        statusEl.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Abgeschlossen</span>';
-      } else {
-        statusEl.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Fehler</span>';
-      }
-      logEl.textContent = data.output || data.message || '';
-      btn.disabled = false;
-    })
-    .catch(e => {
-      statusEl.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Verbindungsfehler</span>';
-      btn.disabled = false;
-    });
-}
-
-// Sofort und dann periodisch Status prüfen
-updateCollectorStatus();
-updateTraderStatus();
-updateTrainingStatus();
-updateHistoryStatus();
-setInterval(updateCollectorStatus, 10000);
-setInterval(updateTraderStatus, 10000);
-setInterval(updateTrainingStatus, 15000);
-setInterval(updateHistoryStatus, 10000);
-</script>
 </body>
 </html>"""
 
@@ -882,66 +952,6 @@ def _get_model_metrics() -> dict:
         return {}
 
 
-def _render_loss_chart(history: dict) -> str:
-    losses = history.get("loss", [])
-    val_losses = history.get("val_loss", [])
-    if not losses:
-        return ""
-
-    W, H = 560, 170
-    PL, PR, PT, PB = 48, 16, 16, 36
-    cw = W - PL - PR
-    ch = H - PT - PB
-    n = len(losses)
-    all_vals = losses + val_losses
-    lo = min(all_vals) * 0.97
-    hi = max(all_vals) * 1.03
-
-    def sx(i):
-        return PL + (i / max(n - 1, 1)) * cw
-
-    def sy(v):
-        return PT + ch - ((v - lo) / max(hi - lo, 1e-9)) * ch
-
-    def polyline(vals, color):
-        pts = " ".join(f"{sx(i):.1f},{sy(v):.1f}" for i, v in enumerate(vals))
-        return f'<polyline points="{pts}" fill="none" stroke="{color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'
-
-    grid = ""
-    for tick in [lo, (lo + hi) / 2, hi]:
-        y = sy(tick)
-        grid += (
-            f'<line x1="{PL}" y1="{y:.1f}" x2="{W - PR}" y2="{y:.1f}" stroke="#1e2330" stroke-width="1"/>'
-            f'<text x="{PL - 5}" y="{y + 4:.1f}" text-anchor="end" font-size="10" fill="#475569">{tick:.3f}</text>'
-        )
-
-    x_labels = ""
-    step = max(1, n // 6)
-    for i in range(0, n, step):
-        x = sx(i)
-        x_labels += f'<text x="{x:.1f}" y="{H - 6}" text-anchor="middle" font-size="10" fill="#475569">{i + 1}</text>'
-
-    axes = (
-        f'<line x1="{PL}" y1="{PT}" x2="{PL}" y2="{H - PB}" stroke="#2d3748" stroke-width="1"/>'
-        f'<line x1="{PL}" y1="{H - PB}" x2="{W - PR}" y2="{H - PB}" stroke="#2d3748" stroke-width="1"/>'
-    )
-    legend = (
-        f'<rect x="{PL}" y="2" width="14" height="4" rx="2" fill="#38bdf8"/>'
-        f'<text x="{PL + 18}" y="9" font-size="10" fill="#94a3b8">Train Loss</text>'
-        f'<rect x="{PL + 88}" y="2" width="14" height="4" rx="2" fill="#f97316"/>'
-        f'<text x="{PL + 106}" y="9" font-size="10" fill="#94a3b8">Val Loss</text>'
-    )
-
-    return (
-        f'<svg viewBox="0 0 {W} {H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-height:170px">'
-        f'{grid}{axes}{x_labels}'
-        f'{polyline(losses, "#38bdf8")}'
-        f'{polyline(val_losses, "#f97316")}'
-        f'{legend}'
-        f'</svg>'
-    )
-
-
 def _collector_running() -> bool:
     result = subprocess.run(
         ["tmux", "has-session", "-t", "iota-collector"],
@@ -992,7 +1002,7 @@ def index():
     stats = get_data_stats(SYMBOL)
     training_stats = _get_training_stats()
     metrics = _get_model_metrics()
-    loss_chart = _render_loss_chart(metrics.get("history", {}))
+    history_json = json.dumps(metrics.get("history", {}))
 
     return render_template_string(
         _TEMPLATE,
@@ -1004,7 +1014,7 @@ def index():
         stats=stats,
         training_stats=training_stats,
         metrics=metrics,
-        loss_chart=loss_chart,
+        history_json=history_json,
         symbol=SYMBOL,
         start_capital=STARTING_CAPITAL,
         refresh=DASHBOARD_REFRESH_SECONDS,
