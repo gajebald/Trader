@@ -286,6 +286,22 @@ _TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div class="ctrl-card">
+      <div class="ctrl-title">Modell-Training</div>
+      <div class="ctrl-status" id="training-status">
+        <span class="status-dot dot-yellow"></span>Prüfe…
+      </div>
+      <div class="btn-row" style="align-items:center">
+        <select id="training-tf" style="padding:7px 10px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:0.82rem;">
+          <option value="1h">1h</option>
+          <option value="5m">5m</option>
+          <option value="1m">1m</option>
+        </select>
+        <button class="btn btn-blue" id="training-btn" onclick="startTraining()">🧠 Training starten</button>
+      </div>
+      <div class="ctrl-log" id="training-log"></div>
+    </div>
+
+    <div class="ctrl-card">
       <div class="ctrl-title">Paper Trader (einmalig)</div>
       <div class="ctrl-status" id="paper-status" style="color:#64748b">—</div>
       <div class="btn-row">
@@ -589,6 +605,48 @@ function traderAction(action) {
     .then(() => { setTimeout(updateTraderStatus, 1800); });
 }
 
+// ---- Training ----
+function updateTrainingStatus() {
+  fetch('/api/training/status')
+    .then(r => r.json())
+    .then(data => {
+      const el = document.getElementById('training-status');
+      const btn = document.getElementById('training-btn');
+      if (data.running) {
+        el.innerHTML = '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Läuft…</span>';
+        btn.disabled = true;
+      } else if (data.model_ready) {
+        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Modell bereit</span>';
+        btn.disabled = false;
+      } else {
+        el.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Kein Modell</span>';
+        btn.disabled = false;
+      }
+    });
+}
+
+function startTraining() {
+  const tf = document.getElementById('training-tf').value;
+  const logEl = document.getElementById('training-log');
+  logEl.textContent = 'Training wird gestartet (' + tf + ')…';
+  _post('/api/training/start?timeframe=' + tf)
+    .then(r => r.json())
+    .then(data => {
+      logEl.textContent = data.message || '';
+      setTimeout(updateTrainingStatus, 2000);
+      // Weiter pollen bis Training fertig
+      const poll = setInterval(() => {
+        fetch('/api/training/status').then(r => r.json()).then(d => {
+          if (!d.running) {
+            clearInterval(poll);
+            updateTrainingStatus();
+            logEl.textContent = d.model_ready ? '✓ Training abgeschlossen — Modell gespeichert.' : '✗ Training beendet (Modell nicht gefunden).';
+          }
+        });
+      }, 5000);
+    });
+}
+
 // ---- Paper trader ----
 function runPaper() {
   const btn = document.getElementById('paper-btn');
@@ -618,8 +676,10 @@ function runPaper() {
 // Sofort und dann alle 10 Sekunden Status prüfen
 updateCollectorStatus();
 updateTraderStatus();
+updateTrainingStatus();
 setInterval(updateCollectorStatus, 10000);
 setInterval(updateTraderStatus, 10000);
+setInterval(updateTrainingStatus, 15000);
 </script>
 </body>
 </html>"""
@@ -853,6 +913,46 @@ def api_trader_stop():
         logger.error("stop_trader failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
     return jsonify({"ok": True})
+
+
+# -------------------------------------------------------
+# API — Training
+# -------------------------------------------------------
+def _training_running() -> bool:
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", "iota-training"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+@app.route("/api/training/status")
+@login_required
+def api_training_status():
+    return jsonify({
+        "running": _training_running(),
+        "model_ready": os.path.exists(MODEL_PATH),
+    })
+
+
+@app.route("/api/training/start", methods=["POST"])
+@login_required
+def api_training_start():
+    if _training_running():
+        return jsonify({"ok": False, "message": "Training läuft bereits."})
+    tf = request.args.get("timeframe", "1h")
+    if tf not in ("1m", "5m", "1h"):
+        return jsonify({"ok": False, "message": "Ungültiger Zeitrahmen."})
+    try:
+        subprocess.Popen(
+            ["bash", str(SCRIPT_DIR / "start_training.sh"), tf],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        logger.error("start_training failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)})
+    return jsonify({"ok": True, "message": f"Training gestartet ({tf}). Kann einige Minuten dauern…"})
 
 
 # -------------------------------------------------------
