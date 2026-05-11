@@ -823,7 +823,7 @@ def _get_training_stats() -> dict:
     result = {}
     for tf in ["1m", "5m", "1h"]:
         try:
-            df = get_recent_candles(SYMBOL, tf, limit=5000)
+            df = get_recent_candles(SYMBOL, tf, limit=50000)
             if len(df) < 10:
                 result[tf] = {"candles": len(df), "clean_rows": 0, "sequences": 0,
                               "hold": 0, "buy": 0, "sell": 0, "ready": False}
