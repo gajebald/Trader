@@ -101,12 +101,20 @@ sonst                   →  HOLD (class 0)
 ### Architektur
 
 ```
-Input(LOOKBACK_STEPS=20, features=11)
+Input(LOOKBACK_STEPS=48, features=11)
 → LSTM(64, return_sequences=True) → Dropout(0.2)
 → LSTM(32) → Dropout(0.2)
 → Dense(16, relu)
 → Dense(3, softmax)   # HOLD=0, BUY=1, SELL=2
 ```
+
+### Empfohlene Parameter für 1h-Daten
+
+| Parameter | Wert | Begründung |
+|---|---|---|
+| LOOKBACK_STEPS | 48 | 48h Geschichte (2 Tage Kontext) |
+| LOOKAHEAD_BARS | 24 | Vorhersage: was passiert in 24h (nicht 10h) |
+| LABEL_THRESHOLD_PCT | 0.03 | 3% Bewegung = echtes Signal, filtert Rauschen |
 
 Loss: `sparse_categorical_crossentropy` + Class-Weighting (HOLD-Dominanz ausgleichen)
 Early Stopping: `patience=8` auf `val_loss`
