@@ -105,7 +105,7 @@ _LOGIN_TEMPLATE = """<!DOCTYPE html>
 </head>
 <body>
   <div class="login-box">
-    <h1>📈 IOTA Trading Bot</h1>
+    <h1>Admin Login</h1>
     <p class="subtitle">Bitte anmelden um fortzufahren</p>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post">
