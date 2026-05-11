@@ -762,11 +762,15 @@ def api_collector_start():
 @app.route("/api/collector/stop", methods=["POST"])
 @login_required
 def api_collector_stop():
-    subprocess.run(
-        ["bash", str(SCRIPT_DIR / "stop_collector.sh")],
-        capture_output=True,
-        timeout=10,
-    )
+    try:
+        subprocess.Popen(
+            ["bash", str(SCRIPT_DIR / "stop_collector.sh")],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        logger.error("stop_collector failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)})
     return jsonify({"ok": True})
 
 
@@ -813,7 +817,7 @@ def run():
     from database import setup_database
     setup_database()
     logger.info("Dashboard startet auf http://%s:%d", DASHBOARD_HOST, DASHBOARD_PORT)
-    app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False)
+    app.run(host=DASHBOARD_HOST, port=DASHBOARD_PORT, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
