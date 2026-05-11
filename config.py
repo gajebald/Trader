@@ -51,3 +51,7 @@ DASHBOARD_PORT = 5000
 DASHBOARD_REFRESH_SECONDS = 30
 DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "iota2024")
 DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "change-this-secret-key-in-production")
+
+# --- Telegram ---
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")

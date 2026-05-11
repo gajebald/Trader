@@ -21,7 +21,11 @@ from config import (
     DASHBOARD_REFRESH_SECONDS, MODEL_PATH, MODEL_METRICS_PATH,
     LOOKBACK_STEPS, LOOKAHEAD_BARS, LABEL_THRESHOLD_PCT, MIN_TRAINING_SAMPLES,
     DASHBOARD_PASSWORD, DASHBOARD_SECRET_KEY,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
 )
+from telegram_notifier import notify_system, send_message as _tg_send
+
+_TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
 from database import get_all_trades, get_open_position, get_recent_candles, get_data_stats, reset_trades
 from indicators import FEATURE_COLUMNS, calculate_all, get_latest_signals, prepare_model_features
 from paper_trader import get_portfolio_status
@@ -378,6 +382,11 @@ _TEMPLATE = """<!DOCTYPE html>
         this.priceLoading = false;
       },
 
+      async testTelegram() {
+        const d = await fetch('/api/telegram/test', { method: 'POST' }).then(r => r.json());
+        alert(d.message || (d.ok ? 'Gesendet!' : 'Fehler'));
+      },
+
       async resetPortfolio() {
         if (!confirm('Alle Trades löschen und Portfolio auf Startkapital zurücksetzen?\\n\\nDiese Aktion kann nicht rückgängig gemacht werden.')) return;
         try {
@@ -446,6 +455,23 @@ _TEMPLATE = """<!DOCTYPE html>
               :class="training.running ? 'text-amber-400' : (training.model_ready ? 'text-emerald-400' : 'text-slate-400')"
               x-text="training.running ? 'Training…' : (training.model_ready ? 'Bereit' : 'Fehlt')"></span>
       </span>
+      {% if telegram_enabled %}
+      <button @click="testTelegram()"
+              class="inline-flex items-center gap-1.5 bg-slate-900 border border-sky-900/50
+                     hover:border-sky-700 rounded-full px-2.5 py-1 text-xs whitespace-nowrap
+                     transition-colors cursor-pointer">
+        <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+        <span class="text-slate-400">Telegram</span>
+        <span class="font-medium text-sky-400">Aktiv</span>
+      </button>
+      {% else %}
+      <span class="inline-flex items-center gap-1.5 bg-slate-900 border border-slate-800
+                   rounded-full px-2.5 py-1 text-xs whitespace-nowrap">
+        <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span>
+        <span class="text-slate-600">Telegram</span>
+        <span class="font-medium text-slate-600">Inaktiv</span>
+      </span>
+      {% endif %}
       <span class="text-slate-700 text-xs hidden sm:inline ml-auto">{{ now }}</span>
     </div>
 
@@ -1167,6 +1193,7 @@ def index():
 
     return render_template_string(
         _TEMPLATE,
+        telegram_enabled=_TELEGRAM_ENABLED,
         status=status,
         trades=trades,
         signals=signals,
@@ -1204,6 +1231,7 @@ def api_collector_start():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
+    notify_system("collector_start")
     return jsonify({"ok": True})
 
 
@@ -1219,6 +1247,7 @@ def api_collector_stop():
     except Exception as e:
         logger.error("stop_collector failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
+    notify_system("collector_stop")
     return jsonify({"ok": True})
 
 
@@ -1261,6 +1290,7 @@ def api_history_start():
     except Exception as e:
         logger.error("start_history failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
+    notify_system("history_start", f"{tf}, {days} Tage")
     return jsonify({"ok": True, "message": f"Download gestartet: {tf}, {days} Tage. Kann einige Minuten dauern…"})
 
 
@@ -1293,6 +1323,7 @@ def api_trader_start():
     except Exception as e:
         logger.error("start_trader failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
+    notify_system("trader_start")
     return jsonify({"ok": True})
 
 
@@ -1308,6 +1339,7 @@ def api_trader_stop():
     except Exception as e:
         logger.error("stop_trader failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
+    notify_system("trader_stop")
     return jsonify({"ok": True})
 
 
@@ -1348,6 +1380,7 @@ def api_training_start():
     except Exception as e:
         logger.error("start_training failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
+    notify_system("training_start", tf)
     return jsonify({"ok": True, "message": f"Training gestartet ({tf}). Kann einige Minuten dauern…"})
 
 
@@ -1372,6 +1405,20 @@ def api_paper_run():
         return jsonify({"ok": False, "output": "Timeout nach 60 Sekunden."})
     except Exception as e:
         return jsonify({"ok": False, "output": str(e)})
+
+
+# -------------------------------------------------------
+# API — Telegram test
+# -------------------------------------------------------
+@app.route("/api/telegram/test", methods=["POST"])
+@login_required
+def api_telegram_test():
+    if not _TELEGRAM_ENABLED:
+        return jsonify({"ok": False, "message": "Telegram nicht konfiguriert (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID fehlt)."})
+    ok = _tg_send("✅ *IOTA Trading Bot* — Verbindungstest erfolgreich.")
+    if ok:
+        return jsonify({"ok": True, "message": "Testnachricht gesendet."})
+    return jsonify({"ok": False, "message": "Senden fehlgeschlagen — Token oder Chat-ID prüfen."})
 
 
 # -------------------------------------------------------
@@ -1411,6 +1458,7 @@ def api_paper_reset():
     try:
         count = reset_trades()
         logger.info("Portfolio reset: %d trades deleted", count)
+        notify_system("portfolio_reset", f"{count} Trades gelöscht")
         return jsonify({"ok": True, "deleted": count})
     except Exception as e:
         logger.error("reset_trades failed: %s", e)

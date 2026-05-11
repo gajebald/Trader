@@ -4,6 +4,7 @@ import logging
 from config import STARTING_CAPITAL, TRADE_FEE_PCT, SYMBOL
 from database import get_all_trades, get_open_position, get_latest_ticker, insert_trade
 from strategy import evaluate
+from telegram_notifier import notify_trade
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,7 @@ def execute_buy(price: float, reason: str) -> dict | None:
     }
     insert_trade(trade)
     logger.info("BUY executed: qty=%.6f price=%.4f fee=%.4f reason=%s", qty, price, fee, reason)
+    notify_trade("BUY", price, qty, 0.0, reason, portfolio_value)
     return trade
 
 
@@ -123,6 +125,7 @@ def execute_sell(price: float, reason: str) -> dict | None:
         "SELL executed: qty=%.6f price=%.4f fee=%.4f pnl=%.4f reason=%s",
         qty, price, sell_fee, pnl, reason,
     )
+    notify_trade("SELL", price, qty, pnl, reason, portfolio_value)
     return trade
 
 
