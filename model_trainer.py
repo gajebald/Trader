@@ -10,14 +10,16 @@ Label generation (look-ahead):
 The model never sees future data during inference — only the past
 LOOKBACK_STEPS bars of normalized indicator features.
 """
+import json
 import logging
 import os
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 
 from config import (
-    SYMBOL, MODEL_PATH, LOOKBACK_STEPS, LOOKAHEAD_BARS,
+    SYMBOL, MODEL_PATH, MODEL_METRICS_PATH, LOOKBACK_STEPS, LOOKAHEAD_BARS,
     LABEL_THRESHOLD_PCT, TRAINING_EPOCHS, TRAINING_BATCH_SIZE,
     MIN_TRAINING_SAMPLES, SMA_LONG,
 )
@@ -176,6 +178,32 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
     val_loss = history.history["val_loss"][-1]
     val_acc = history.history["val_accuracy"][-1]
     epochs_run = len(history.history["loss"])
+
+    # Save metrics JSON for the dashboard
+    metrics = {
+        "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timeframe": timeframe,
+        "epochs_ran": epochs_run,
+        "val_loss": round(float(val_loss), 4),
+        "val_accuracy": round(float(val_acc), 4),
+        "train_samples": len(X_train),
+        "val_samples": len(X_val),
+        "class_weights": {
+            "HOLD": round(class_weight[0], 3),
+            "BUY": round(class_weight[1], 3),
+            "SELL": round(class_weight[2], 3),
+        },
+        "history": {
+            "loss":         [round(float(x), 4) for x in history.history["loss"]],
+            "val_loss":     [round(float(x), 4) for x in history.history["val_loss"]],
+            "accuracy":     [round(float(x), 4) for x in history.history["accuracy"]],
+            "val_accuracy": [round(float(x), 4) for x in history.history["val_accuracy"]],
+        },
+    }
+    with open(MODEL_METRICS_PATH, "w") as fh:
+        json.dump(metrics, fh, indent=2)
+    logger.info("Metrics saved to %s", MODEL_METRICS_PATH)
+
     print(f"\n=== Training Complete ===")
     print(f"  Epochs ran      : {epochs_run}")
     print(f"  Val loss        : {val_loss:.4f}")
