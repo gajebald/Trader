@@ -4,37 +4,121 @@ Zeigt Portfolio, Trades und aktuelle Marktsignale.
 Läuft auf localhost, nginx proxied von außen.
 """
 import os
+import sys
+import subprocess
 import time as _time
 import logging
 from datetime import datetime
+from functools import wraps
+from pathlib import Path
 
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, request, redirect, url_for, session, jsonify
 
 from config import (
     SYMBOL, STARTING_CAPITAL, DASHBOARD_HOST, DASHBOARD_PORT,
     DASHBOARD_REFRESH_SECONDS, MODEL_PATH,
     LOOKBACK_STEPS, LOOKAHEAD_BARS, LABEL_THRESHOLD_PCT, MIN_TRAINING_SAMPLES,
+    DASHBOARD_PASSWORD, DASHBOARD_SECRET_KEY,
 )
-from database import get_all_trades, get_open_position, get_latest_ticker, get_recent_candles, get_data_stats
+from database import get_all_trades, get_open_position, get_recent_candles, get_data_stats
 from indicators import FEATURE_COLUMNS, calculate_all, get_latest_signals, prepare_model_features
 from paper_trader import get_portfolio_status
 
 logger = logging.getLogger(__name__)
+
+SCRIPT_DIR = Path(__file__).parent
+PYTHON = sys.executable
+
 app = Flask(__name__)
+app.secret_key = DASHBOARD_SECRET_KEY
 
-
-@app.template_filter("ts")
-def _ts_filter(ms):
-    """Formatiert einen Unix-Millisekunden-Timestamp als lesbares Datum."""
-    if not ms:
-        return "—"
-    try:
-        return datetime.fromtimestamp(int(ms) / 1000).strftime("%d.%m.%y %H:%M")
-    except Exception:
-        return "—"
 
 # -------------------------------------------------------
-# HTML-Template (inline, keine externen Abhängigkeiten)
+# Auth
+# -------------------------------------------------------
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+# -------------------------------------------------------
+# Login-Template
+# -------------------------------------------------------
+_LOGIN_TEMPLATE = """<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IOTA Trading Bot — Login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-box {
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 14px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 360px;
+      text-align: center;
+    }
+    h1 { font-size: 1.3rem; font-weight: 700; color: #f8fafc; margin-bottom: 6px; }
+    .subtitle { font-size: 0.8rem; color: #64748b; margin-bottom: 28px; }
+    input[type=password] {
+      width: 100%;
+      padding: 11px 14px;
+      background: #161b27;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 0.95rem;
+      outline: none;
+      margin-bottom: 14px;
+    }
+    input[type=password]:focus { border-color: #38bdf8; }
+    button {
+      width: 100%;
+      padding: 11px;
+      background: #38bdf8;
+      color: #0f1117;
+      font-weight: 700;
+      font-size: 0.95rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:hover { background: #7dd3fc; }
+    .error { color: #f87171; font-size: 0.82rem; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>📈 IOTA Trading Bot</h1>
+    <p class="subtitle">Bitte anmelden um fortzufahren</p>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <form method="post">
+      <input type="password" name="password" placeholder="Passwort" autofocus>
+      <button type="submit">Anmelden</button>
+    </form>
+  </div>
+</body>
+</html>"""
+
+
+# -------------------------------------------------------
+# Haupt-Template
 # -------------------------------------------------------
 _TEMPLATE = """<!DOCTYPE html>
 <html lang="de">
@@ -52,9 +136,22 @@ _TEMPLATE = """<!DOCTYPE html>
       min-height: 100vh;
       padding: 24px 16px;
     }
+    .header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 28px; }
     h1 { font-size: 1.5rem; font-weight: 700; color: #f8fafc; margin-bottom: 4px; }
-    .subtitle { color: #64748b; font-size: 0.85rem; margin-bottom: 28px; }
+    .subtitle { color: #64748b; font-size: 0.85rem; }
     .subtitle .updated { color: #38bdf8; }
+    .logout-btn {
+      padding: 7px 16px;
+      background: #1e2330;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      color: #94a3b8;
+      font-size: 0.8rem;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .logout-btn:hover { border-color: #f87171; color: #f87171; }
 
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
     .card {
@@ -101,7 +198,7 @@ _TEMPLATE = """<!DOCTYPE html>
     .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
     .dot-green  { background: #4ade80; box-shadow: 0 0 6px #4ade80; }
     .dot-red    { background: #f87171; }
-    .dot-yellow { background: #facc15; }
+    .dot-yellow { background: #facc15; box-shadow: 0 0 6px #facc15; }
 
     .empty { color: #475569; font-style: italic; text-align: center; padding: 20px; }
     footer { text-align: center; color: #334155; font-size: 0.75rem; margin-top: 12px; }
@@ -112,16 +209,82 @@ _TEMPLATE = """<!DOCTYPE html>
     .tf-count { font-size: 1.4rem; font-weight: 700; color: #f8fafc; }
     .tf-label { font-size: 0.7rem; color: #64748b; margin-top: 2px; }
     .tf-range { font-size: 0.72rem; color: #475569; margin-top: 6px; border-top: 1px solid #1e2330; padding-top: 6px; }
+
+    /* Steuerung */
+    .ctrl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .ctrl-card { background: #161b27; border-radius: 10px; padding: 16px 18px; }
+    .ctrl-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: #64748b; margin-bottom: 10px; }
+    .ctrl-status { font-size: 0.9rem; font-weight: 600; min-height: 22px; margin-bottom: 14px; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 7px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn:disabled { opacity: .4; cursor: default; }
+    .btn-green { background: #166534; color: #4ade80; border: 1px solid #166534; }
+    .btn-red   { background: #7f1d1d; color: #f87171; border: 1px solid #7f1d1d; }
+    .btn-blue  { background: #0c4a6e; color: #38bdf8; border: 1px solid #0c4a6e; }
+    .ctrl-log {
+      margin-top: 10px;
+      font-size: 0.75rem;
+      color: #64748b;
+      font-family: monospace;
+      background: #0f1117;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-height: 36px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
 
-<h1>📈 IOTA Trading Bot</h1>
-<p class="subtitle">
-  Symbol: <strong>{{ symbol }}</strong> &nbsp;|&nbsp;
-  Aktualisierung alle {{ refresh }}s &nbsp;|&nbsp;
-  <span class="updated">{{ now }}</span>
-</p>
+<div class="header">
+  <div>
+    <h1>📈 IOTA Trading Bot</h1>
+    <p class="subtitle">
+      Symbol: <strong>{{ symbol }}</strong> &nbsp;|&nbsp;
+      Aktualisierung alle {{ refresh }}s &nbsp;|&nbsp;
+      <span class="updated">{{ now }}</span>
+    </p>
+  </div>
+  <a href="/logout" class="logout-btn">Abmelden</a>
+</div>
+
+<!-- Steuerung -->
+<div class="section-title">Steuerung</div>
+<div class="panel">
+  <div class="ctrl-grid">
+
+    <div class="ctrl-card">
+      <div class="ctrl-title">Datensammler</div>
+      <div class="ctrl-status" id="collector-status">
+        <span class="status-dot dot-yellow"></span>Prüfe…
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="collectorAction('start')">▶ Starten</button>
+        <button class="btn btn-red"   onclick="collectorAction('stop')">■ Stoppen</button>
+      </div>
+    </div>
+
+    <div class="ctrl-card">
+      <div class="ctrl-title">Paper Trader</div>
+      <div class="ctrl-status" id="paper-status" style="color:#64748b">—</div>
+      <div class="btn-row">
+        <button class="btn btn-blue" id="paper-btn" onclick="runPaper()">⚡ Iteration ausführen</button>
+      </div>
+      <div class="ctrl-log" id="paper-log"></div>
+    </div>
+
+  </div>
+</div>
 
 <!-- Portfolio-Karten -->
 <div class="grid">
@@ -319,7 +482,7 @@ _TEMPLATE = """<!DOCTYPE html>
     </div>
   </div>
   {% else %}
-  <div class="empty">Noch keine Signaldaten — bitte zuerst 'python main.py collect' ausführen.</div>
+  <div class="empty">Noch keine Signaldaten — bitte zuerst den Datensammler starten.</div>
   {% endif %}
 </div>
 
@@ -363,6 +526,67 @@ _TEMPLATE = """<!DOCTYPE html>
 </div>
 
 <footer>IOTA Trading Bot &mdash; Paper Trading Only &mdash; Kein Echtgeld</footer>
+
+<script>
+function _post(url) {
+  return fetch(url, {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}});
+}
+
+// ---- Collector status polling ----
+function updateCollectorStatus() {
+  fetch('/api/collector/status')
+    .then(r => r.json())
+    .then(data => {
+      const el = document.getElementById('collector-status');
+      if (data.running) {
+        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Läuft</span>';
+      } else {
+        el.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Gestoppt</span>';
+      }
+    })
+    .catch(() => {
+      document.getElementById('collector-status').innerHTML =
+        '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Unbekannt</span>';
+    });
+}
+
+function collectorAction(action) {
+  _post('/api/collector/' + action)
+    .then(() => {
+      setTimeout(updateCollectorStatus, 1800);
+    });
+}
+
+// ---- Paper trader ----
+function runPaper() {
+  const btn = document.getElementById('paper-btn');
+  const statusEl = document.getElementById('paper-status');
+  const logEl = document.getElementById('paper-log');
+  btn.disabled = true;
+  statusEl.innerHTML = '<span class="status-dot dot-yellow"></span>Wird ausgeführt…';
+  statusEl.style.color = '#facc15';
+  logEl.textContent = '';
+  _post('/api/paper/run')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        statusEl.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Abgeschlossen</span>';
+      } else {
+        statusEl.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Fehler</span>';
+      }
+      logEl.textContent = data.output || data.message || '';
+      btn.disabled = false;
+    })
+    .catch(e => {
+      statusEl.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Verbindungsfehler</span>';
+      btn.disabled = false;
+    });
+}
+
+// Sofort und dann alle 10 Sekunden Collector-Status prüfen
+updateCollectorStatus();
+setInterval(updateCollectorStatus, 10000);
+</script>
 </body>
 </html>"""
 
@@ -396,7 +620,8 @@ def _get_training_stats() -> dict:
         try:
             df = get_recent_candles(SYMBOL, tf, limit=5000)
             if len(df) < 10:
-                result[tf] = {"candles": len(df), "clean_rows": 0, "sequences": 0, "hold": 0, "buy": 0, "sell": 0, "ready": False}
+                result[tf] = {"candles": len(df), "clean_rows": 0, "sequences": 0,
+                              "hold": 0, "buy": 0, "sell": 0, "ready": False}
                 continue
             df = calculate_all(df)
             df = prepare_model_features(df)
@@ -425,7 +650,8 @@ def _get_training_stats() -> dict:
             }
         except Exception as e:
             logger.warning("Trainingsstats für %s fehlgeschlagen: %s", tf, e)
-            result[tf] = {"candles": 0, "clean_rows": 0, "sequences": 0, "hold": 0, "buy": 0, "sell": 0, "ready": False}
+            result[tf] = {"candles": 0, "clean_rows": 0, "sequences": 0,
+                          "hold": 0, "buy": 0, "sell": 0, "ready": False}
 
     _training_cache["data"] = result
     _training_cache["ts"] = now
@@ -443,10 +669,38 @@ def _format_trades(raw: list) -> list:
     return result
 
 
+def _collector_running() -> bool:
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", "iota-collector"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 # -------------------------------------------------------
-# Route
+# Auth-Routen
+# -------------------------------------------------------
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        if request.form.get("password") == DASHBOARD_PASSWORD:
+            session["logged_in"] = True
+            return redirect(url_for("index"))
+        return render_template_string(_LOGIN_TEMPLATE, error="Falsches Passwort")
+    return render_template_string(_LOGIN_TEMPLATE, error=None)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+# -------------------------------------------------------
+# Haupt-Route
 # -------------------------------------------------------
 @app.route("/")
+@login_required
 def index():
     try:
         status = get_portfolio_status()
@@ -483,6 +737,73 @@ def index():
         lookahead_bars=LOOKAHEAD_BARS,
         label_threshold_pct=LABEL_THRESHOLD_PCT,
     )
+
+
+# -------------------------------------------------------
+# API — Collector
+# -------------------------------------------------------
+@app.route("/api/collector/status")
+@login_required
+def api_collector_status():
+    return jsonify({"running": _collector_running()})
+
+
+@app.route("/api/collector/start", methods=["POST"])
+@login_required
+def api_collector_start():
+    subprocess.Popen(
+        ["bash", str(SCRIPT_DIR / "start_collector.sh")],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return jsonify({"ok": True})
+
+
+@app.route("/api/collector/stop", methods=["POST"])
+@login_required
+def api_collector_stop():
+    subprocess.run(
+        ["bash", str(SCRIPT_DIR / "stop_collector.sh")],
+        capture_output=True,
+        timeout=10,
+    )
+    return jsonify({"ok": True})
+
+
+# -------------------------------------------------------
+# API — Paper Trader
+# -------------------------------------------------------
+@app.route("/api/paper/run", methods=["POST"])
+@login_required
+def api_paper_run():
+    try:
+        result = subprocess.run(
+            [PYTHON, str(SCRIPT_DIR / "main.py"), "paper"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(SCRIPT_DIR),
+        )
+        output = (result.stdout + result.stderr).strip()
+        ok = result.returncode == 0
+        return jsonify({"ok": ok, "output": output[-1500:] if len(output) > 1500 else output})
+    except subprocess.TimeoutExpired:
+        return jsonify({"ok": False, "output": "Timeout nach 60 Sekunden."})
+    except Exception as e:
+        return jsonify({"ok": False, "output": str(e)})
+
+
+# -------------------------------------------------------
+# Template filter
+# -------------------------------------------------------
+@app.template_filter("ts")
+def _ts_filter(ms):
+    if not ms:
+        return "—"
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000).strftime("%d.%m.%y %H:%M")
+    except Exception:
+        return "—"
 
 
 # -------------------------------------------------------

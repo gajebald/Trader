@@ -48,3 +48,5 @@ COLLECT_INTERVAL_SECONDS = 60
 DASHBOARD_HOST = "127.0.0.1"  # nur lokal, nginx proxied von außen
 DASHBOARD_PORT = 5000
 DASHBOARD_REFRESH_SECONDS = 30
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "iota2024")
+DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "change-this-secret-key-in-production")
