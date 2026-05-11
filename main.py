@@ -34,6 +34,17 @@ def cmd_paper(args) -> None:
     run_iteration()
 
 
+def cmd_history(args) -> None:
+    from data_collector import run_historical_download
+    setup_database()
+    tf = args.timeframe
+    days = args.days
+    print(f"\nLade historische Daten: {days} Tage zurück, Zeitrahmen {tf}")
+    print("Abbruch mit Ctrl+C möglich.\n")
+    total = run_historical_download(timeframe=tf, days_back=days)
+    print(f"\nFertig. {total} Candles in der Datenbank gespeichert.")
+
+
 def cmd_trade(args) -> None:
     import time
     from paper_trader import run_iteration
@@ -140,6 +151,12 @@ Typical workflow:
     subparsers.add_parser("paper", help="Run one paper trading iteration")
     subparsers.add_parser("trade", help="Start continuous paper trading loop")
 
+    hist_parser = subparsers.add_parser("history", help="Bulk-download historical candles from Bitfinex")
+    hist_parser.add_argument("--timeframe", default="1h", choices=["1m", "5m", "1h"],
+                             help="Candle timeframe (default: 1h)")
+    hist_parser.add_argument("--days", type=int, default=365,
+                             help="How many days back to download (default: 365)")
+
     bt_parser = subparsers.add_parser("backtest", help="Run historical backtest")
     bt_parser.add_argument(
         "--timeframe", default="1h", choices=["1m", "5m", "1h"],
@@ -152,6 +169,7 @@ Typical workflow:
 
     dispatch = {
         "collect": cmd_collect,
+        "history": cmd_history,
         "train": cmd_train,
         "paper": cmd_paper,
         "trade": cmd_trade,

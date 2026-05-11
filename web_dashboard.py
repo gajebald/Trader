@@ -288,6 +288,25 @@ _TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div class="ctrl-card">
+      <div class="ctrl-title">Historische Daten</div>
+      <div class="ctrl-status" id="history-status">
+        <span class="status-dot dot-yellow"></span>Prüfe…
+      </div>
+      <div class="btn-row" style="align-items:center;flex-wrap:wrap;gap:6px">
+        <select id="history-tf" style="padding:7px 10px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:0.82rem">
+          <option value="1h">1h</option>
+          <option value="5m">5m</option>
+          <option value="1m">1m</option>
+        </select>
+        <input id="history-days" type="number" value="365" min="1" max="1825"
+               style="width:68px;padding:7px 8px;background:#0f1117;border:1px solid #2d3748;border-radius:7px;color:#e2e8f0;font-size:0.82rem">
+        <span style="font-size:0.75rem;color:#64748b">Tage</span>
+        <button class="btn btn-blue" id="history-btn" onclick="startHistory()">📥 Laden</button>
+      </div>
+      <div class="ctrl-log" id="history-log"></div>
+    </div>
+
+    <div class="ctrl-card">
       <div class="ctrl-title">Modell-Training</div>
       <div class="ctrl-status" id="training-status">
         <span class="status-dot dot-yellow"></span>Prüfe…
@@ -656,6 +675,45 @@ function traderAction(action) {
     .then(() => { setTimeout(updateTraderStatus, 1800); });
 }
 
+// ---- Historical download ----
+function updateHistoryStatus() {
+  fetch('/api/history/status')
+    .then(r => r.json())
+    .then(data => {
+      const el = document.getElementById('history-status');
+      const btn = document.getElementById('history-btn');
+      if (data.running) {
+        el.innerHTML = '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Lädt…</span>';
+        btn.disabled = true;
+      } else {
+        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#94a3b8">Bereit</span>';
+        btn.disabled = false;
+      }
+    });
+}
+
+function startHistory() {
+  const tf   = document.getElementById('history-tf').value;
+  const days = document.getElementById('history-days').value;
+  const logEl = document.getElementById('history-log');
+  logEl.textContent = `Download wird gestartet (${tf}, ${days} Tage)…`;
+  _post(`/api/history/start?timeframe=${tf}&days=${days}`)
+    .then(r => r.json())
+    .then(data => {
+      logEl.textContent = data.message || '';
+      setTimeout(updateHistoryStatus, 2000);
+      const poll = setInterval(() => {
+        fetch('/api/history/status').then(r => r.json()).then(d => {
+          if (!d.running) {
+            clearInterval(poll);
+            updateHistoryStatus();
+            logEl.textContent = '✓ Download abgeschlossen. Trainingsdaten aktualisiert.';
+          }
+        });
+      }, 4000);
+    });
+}
+
 // ---- Training ----
 function updateTrainingStatus() {
   fetch('/api/training/status')
@@ -724,13 +782,15 @@ function runPaper() {
     });
 }
 
-// Sofort und dann alle 10 Sekunden Status prüfen
+// Sofort und dann periodisch Status prüfen
 updateCollectorStatus();
 updateTraderStatus();
 updateTrainingStatus();
+updateHistoryStatus();
 setInterval(updateCollectorStatus, 10000);
 setInterval(updateTraderStatus, 10000);
 setInterval(updateTrainingStatus, 15000);
+setInterval(updateHistoryStatus, 10000);
 </script>
 </body>
 </html>"""
@@ -989,6 +1049,48 @@ def api_collector_stop():
         logger.error("stop_collector failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
     return jsonify({"ok": True})
+
+
+# -------------------------------------------------------
+# API — Historical Download
+# -------------------------------------------------------
+def _history_running() -> bool:
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", "iota-history"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+@app.route("/api/history/status")
+@login_required
+def api_history_status():
+    return jsonify({"running": _history_running()})
+
+
+@app.route("/api/history/start", methods=["POST"])
+@login_required
+def api_history_start():
+    if _history_running():
+        return jsonify({"ok": False, "message": "Download läuft bereits."})
+    tf = request.args.get("timeframe", "1h")
+    if tf not in ("1m", "5m", "1h"):
+        return jsonify({"ok": False, "message": "Ungültiger Zeitrahmen."})
+    try:
+        days = int(request.args.get("days", 365))
+        days = max(1, min(days, 1825))
+    except ValueError:
+        days = 365
+    try:
+        subprocess.Popen(
+            ["bash", str(SCRIPT_DIR / "start_history.sh"), tf, str(days)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        logger.error("start_history failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)})
+    return jsonify({"ok": True, "message": f"Download gestartet: {tf}, {days} Tage. Kann einige Minuten dauern…"})
 
 
 # -------------------------------------------------------
