@@ -88,7 +88,7 @@ _LOGIN_TEMPLATE = """<!DOCTYPE html>
         </button>
       </form>
     </div>
-    <p class="text-center text-slate-700 text-xs mt-6">IOTA Trading Bot &mdash; Paper Trading Only</p>
+    <p class="text-center text-slate-700 text-xs mt-6">Du bist nicht berechtigt, dich hier einzuloggen.</p>
   </div>
 </body>
 </html>"""
