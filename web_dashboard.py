@@ -275,7 +275,18 @@ _TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <div class="ctrl-card">
-      <div class="ctrl-title">Paper Trader</div>
+      <div class="ctrl-title">Trading-Loop</div>
+      <div class="ctrl-status" id="trader-status">
+        <span class="status-dot dot-yellow"></span>Prüfe…
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="traderAction('start')">▶ Starten</button>
+        <button class="btn btn-red"   onclick="traderAction('stop')">■ Stoppen</button>
+      </div>
+    </div>
+
+    <div class="ctrl-card">
+      <div class="ctrl-title">Paper Trader (einmalig)</div>
       <div class="ctrl-status" id="paper-status" style="color:#64748b">—</div>
       <div class="btn-row">
         <button class="btn btn-blue" id="paper-btn" onclick="runPaper()">⚡ Iteration ausführen</button>
@@ -552,9 +563,30 @@ function updateCollectorStatus() {
 
 function collectorAction(action) {
   _post('/api/collector/' + action)
-    .then(() => {
-      setTimeout(updateCollectorStatus, 1800);
+    .then(() => { setTimeout(updateCollectorStatus, 1800); });
+}
+
+// ---- Trader status polling ----
+function updateTraderStatus() {
+  fetch('/api/trader/status')
+    .then(r => r.json())
+    .then(data => {
+      const el = document.getElementById('trader-status');
+      if (data.running) {
+        el.innerHTML = '<span class="status-dot dot-green"></span><span style="color:#4ade80">Läuft</span>';
+      } else {
+        el.innerHTML = '<span class="status-dot dot-red"></span><span style="color:#f87171">Gestoppt</span>';
+      }
+    })
+    .catch(() => {
+      document.getElementById('trader-status').innerHTML =
+        '<span class="status-dot dot-yellow"></span><span style="color:#facc15">Unbekannt</span>';
     });
+}
+
+function traderAction(action) {
+  _post('/api/trader/' + action)
+    .then(() => { setTimeout(updateTraderStatus, 1800); });
 }
 
 // ---- Paper trader ----
@@ -583,9 +615,11 @@ function runPaper() {
     });
 }
 
-// Sofort und dann alle 10 Sekunden Collector-Status prüfen
+// Sofort und dann alle 10 Sekunden Status prüfen
 updateCollectorStatus();
+updateTraderStatus();
 setInterval(updateCollectorStatus, 10000);
+setInterval(updateTraderStatus, 10000);
 </script>
 </body>
 </html>"""
@@ -770,6 +804,53 @@ def api_collector_stop():
         )
     except Exception as e:
         logger.error("stop_collector failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)})
+    return jsonify({"ok": True})
+
+
+# -------------------------------------------------------
+# API — Trading Loop
+# -------------------------------------------------------
+def _trader_running() -> bool:
+    result = subprocess.run(
+        ["tmux", "has-session", "-t", "iota-trader"],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+@app.route("/api/trader/status")
+@login_required
+def api_trader_status():
+    return jsonify({"running": _trader_running()})
+
+
+@app.route("/api/trader/start", methods=["POST"])
+@login_required
+def api_trader_start():
+    try:
+        subprocess.Popen(
+            ["bash", str(SCRIPT_DIR / "start_trader.sh")],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        logger.error("start_trader failed: %s", e)
+        return jsonify({"ok": False, "message": str(e)})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/trader/stop", methods=["POST"])
+@login_required
+def api_trader_stop():
+    try:
+        subprocess.Popen(
+            ["bash", str(SCRIPT_DIR / "stop_trader.sh")],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        logger.error("stop_trader failed: %s", e)
         return jsonify({"ok": False, "message": str(e)})
     return jsonify({"ok": True})
 

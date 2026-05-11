@@ -34,6 +34,21 @@ def cmd_paper(args) -> None:
     run_iteration()
 
 
+def cmd_trade(args) -> None:
+    import time
+    from paper_trader import run_iteration
+    from config import COLLECT_INTERVAL_SECONDS
+    setup_database()
+    logger = logging.getLogger("trade")
+    logger.info("Paper Trading Loop gestartet (Intervall: %ds). Ctrl+C zum Stoppen.", COLLECT_INTERVAL_SECONDS)
+    while True:
+        try:
+            run_iteration()
+        except Exception as e:
+            logger.error("Trading-Iteration fehlgeschlagen: %s", e)
+        time.sleep(COLLECT_INTERVAL_SECONDS)
+
+
 def cmd_backtest(args) -> None:
     from backtester import run_backtest
     setup_database()
@@ -123,6 +138,7 @@ Typical workflow:
     )
 
     subparsers.add_parser("paper", help="Run one paper trading iteration")
+    subparsers.add_parser("trade", help="Start continuous paper trading loop")
 
     bt_parser = subparsers.add_parser("backtest", help="Run historical backtest")
     bt_parser.add_argument(
@@ -138,6 +154,7 @@ Typical workflow:
         "collect": cmd_collect,
         "train": cmd_train,
         "paper": cmd_paper,
+        "trade": cmd_trade,
         "backtest": cmd_backtest,
         "status": cmd_status,
         "dashboard": cmd_dashboard,
