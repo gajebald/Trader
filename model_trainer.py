@@ -130,9 +130,7 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
         sample_weight=sample_weight,
         eval_set=[(X_train, y_train), (X_val, y_val)],
         verbose=10,
-        callbacks=[xgb.callback.EvaluationMonitor()],
     )
-    # Pull evals from booster directly (works with all xgb versions)
     evals_result = model.evals_result()
 
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
