@@ -1697,7 +1697,7 @@ def api_simulation_run():
     if tf not in ("1m", "5m", "1h"):
         tf = "1h"
     try:
-        limit = min(int(request.args.get("limit", 500)), 2000)
+        limit = min(int(request.args.get("limit", 500)), 50000)
     except ValueError:
         limit = 500
     try:
