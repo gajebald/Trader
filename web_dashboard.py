@@ -133,6 +133,7 @@ _TEMPLATE = """<!DOCTYPE html>
       paperLog:    '',
       historyLog:  '',
       trainingLog: '',
+      sim: { loading: false, tf: '1h', limit: 500, data: null, error: '', chart: null },
       priceChart:   null,
       priceChartTf: '1h',
       priceLoading: false,
@@ -380,6 +381,126 @@ _TEMPLATE = """<!DOCTYPE html>
           }
         } catch(e) { console.error('Chart load failed', e); }
         this.priceLoading = false;
+      },
+
+      async runSimulation() {
+        this.sim.loading = true;
+        this.sim.error   = '';
+        this.sim.data    = null;
+        if (this.sim.chart) { this.sim.chart.destroy(); this.sim.chart = null; }
+        try {
+          const r = await fetch(
+            '/api/simulation/run?timeframe=' + this.sim.tf + '&limit=' + this.sim.limit,
+            { method: 'POST' }
+          );
+          const d = await r.json();
+          if (d.error) { this.sim.error = d.error; }
+          else { this.sim.data = d; this.$nextTick(() => this.renderSimChart(d)); }
+        } catch(e) { this.sim.error = 'Verbindungsfehler: ' + e.message; }
+        this.sim.loading = false;
+      },
+
+      renderSimChart(data) {
+        const canvas = document.getElementById('sim-chart');
+        if (!canvas) return;
+        if (this.sim.chart) { this.sim.chart.destroy(); this.sim.chart = null; }
+        const bpRadii = data.buy_prices.map(v  => v !== null ? 7 : 0);
+        const spRadii = data.sell_prices.map(v => v !== null ? 7 : 0);
+        this.sim.chart = new Chart(canvas, {
+          type: 'line',
+          data: {
+            labels: data.labels,
+            datasets: [
+              {
+                label: 'Portfolio $',
+                data: data.equity,
+                borderColor: '#34d399',
+                backgroundColor: 'rgba(52,211,153,0.06)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.3,
+                yAxisID: 'yEq',
+                order: 3,
+              },
+              {
+                label: 'Preis',
+                data: data.closes,
+                borderColor: '#38bdf8',
+                borderWidth: 1.5,
+                pointRadius: 0,
+                fill: false,
+                tension: 0.3,
+                yAxisID: 'yPx',
+                order: 4,
+              },
+              {
+                label: 'BUY',
+                data: data.buy_prices,
+                backgroundColor: '#4ade80',
+                borderColor: '#4ade80',
+                pointRadius: bpRadii,
+                pointHoverRadius: bpRadii.map(r => r ? r + 2 : 0),
+                pointStyle: 'triangle',
+                showLine: false,
+                yAxisID: 'yPx',
+                order: 1,
+              },
+              {
+                label: 'SELL',
+                data: data.sell_prices,
+                backgroundColor: '#f87171',
+                borderColor: '#f87171',
+                pointRadius: spRadii,
+                pointHoverRadius: spRadii.map(r => r ? r + 2 : 0),
+                pointStyle: 'triangle',
+                rotation: 180,
+                showLine: false,
+                yAxisID: 'yPx',
+                order: 2,
+              },
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { intersect: false, mode: 'index' },
+            plugins: {
+              legend: { labels: { color: '#94a3b8', boxWidth: 10, font: { size: 11 },
+                filter: item => item.text !== 'Preis' || true } },
+              tooltip: {
+                callbacks: {
+                  label: ctx => {
+                    if (ctx.raw === null || ctx.raw === undefined) return null;
+                    if (ctx.dataset.label === 'Portfolio $') return 'Portfolio: $' + ctx.raw.toFixed(2);
+                    if (ctx.dataset.label === 'Preis') return 'Preis: $' + ctx.raw.toFixed(4);
+                    if (ctx.dataset.label === 'BUY')  return '\\u25b2 BUY @ $' + ctx.raw.toFixed(4);
+                    if (ctx.dataset.label === 'SELL') return '\\u25bc SELL @ $' + ctx.raw.toFixed(4);
+                    return null;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                ticks: { color: '#475569', maxTicksLimit: 10, font: { size: 10 } },
+                grid:  { color: '#1e293b' },
+              },
+              yPx: {
+                type: 'linear', position: 'right',
+                ticks: { color: '#38bdf8', font: { size: 10 }, callback: v => '$' + v.toFixed(4) },
+                grid:  { color: '#1e293b' },
+                title: { display: true, text: 'Preis', color: '#38bdf8', font: { size: 10 } },
+              },
+              yEq: {
+                type: 'linear', position: 'left',
+                ticks: { color: '#34d399', font: { size: 10 }, callback: v => '$' + v.toFixed(0) },
+                grid:  { display: false },
+                title: { display: true, text: 'Portfolio', color: '#34d399', font: { size: 10 } },
+              },
+            }
+          }
+        });
       },
 
       async testTelegram() {
@@ -731,6 +852,13 @@ _TEMPLATE = """<!DOCTYPE html>
         Trades
         {% if trades %}<span class="ml-1.5 bg-slate-800 text-slate-400 text-xs rounded-full px-1.5 py-0.5">{{ trades|length }}</span>{% endif %}
       </button>
+      <button @click="activeTab = 'sim'"
+              :class="activeTab === 'sim'
+                ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
+                : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+        Simulation
+      </button>
     </div>
 
     <!-- ── Tab: Kurs ── -->
@@ -1039,6 +1167,127 @@ _TEMPLATE = """<!DOCTYPE html>
         <p class="text-slate-500 text-sm">Noch keine Trades vorhanden.</p>
       </div>
       {% endif %}
+    </div>
+
+    <!-- ── Tab: Simulation ── -->
+    <div x-show="activeTab === 'sim'" x-transition:enter="transition ease-out duration-150"
+         x-transition:enter-start="opacity-0 translate-y-1" x-transition:enter-end="opacity-100 translate-y-0">
+
+      <!-- Controls -->
+      <div class="flex flex-wrap items-center gap-3 mb-5">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500">Zeitrahmen:</span>
+          <template x-for="tf in ['1m','5m','1h']" :key="tf">
+            <button @click="sim.tf = tf"
+                    :class="sim.tf === tf
+                      ? 'bg-sky-900/50 text-sky-400 border-sky-700'
+                      : 'bg-slate-900 text-slate-500 border-slate-800 hover:text-slate-300'"
+                    class="px-3 py-1 text-xs font-semibold rounded-lg border transition-colors"
+                    x-text="tf"></button>
+          </template>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500">Candles:</span>
+          <select x-model.number="sim.limit"
+                  class="bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-300
+                         px-2 py-1.5 focus:outline-none focus:border-sky-600 transition-colors">
+            <option value="200">200</option>
+            <option value="500" selected>500</option>
+            <option value="1000">1000</option>
+            <option value="2000">2000</option>
+          </select>
+        </div>
+        <button @click="runSimulation()"
+                :disabled="sim.loading"
+                class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-xl
+                       bg-emerald-900/40 text-emerald-400 border border-emerald-900
+                       hover:bg-emerald-900/70 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+          <span x-show="!sim.loading">&#9654; Simulation starten</span>
+          <span x-show="sim.loading" class="flex items-center gap-1.5">
+            <svg class="animate-spin w-3 h-3" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            Berechne…
+          </span>
+        </button>
+        <span class="text-xs text-slate-600">LSTM-Modell auf historischen Daten</span>
+      </div>
+
+      <!-- Error state -->
+      <div x-show="sim.error"
+           class="bg-red-950/40 border border-red-900 rounded-2xl px-5 py-4 mb-5 text-sm text-red-400"
+           x-text="sim.error"></div>
+
+      <!-- Summary cards (shown after simulation) -->
+      <div x-show="sim.data" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-5">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Start</div>
+          <div class="text-xl font-bold text-slate-400" x-text="'$' + (sim.data?.summary?.start_capital ?? 0)"></div>
+        </div>
+        <div class="col-span-1 bg-slate-900 border rounded-2xl p-4"
+             :class="(sim.data?.summary?.end_capital ?? 0) >= (sim.data?.summary?.start_capital ?? 0)
+               ? 'border-emerald-900/50' : 'border-red-900/50'">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">End</div>
+          <div class="text-xl font-bold"
+               :class="(sim.data?.summary?.end_capital ?? 0) >= (sim.data?.summary?.start_capital ?? 0)
+                 ? 'text-emerald-400' : 'text-red-400'"
+               x-text="'$' + (sim.data?.summary?.end_capital?.toFixed(2) ?? 0)"></div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Return</div>
+          <div class="text-xl font-bold"
+               :class="(sim.data?.summary?.total_return_pct ?? 0) >= 0 ? 'text-emerald-400' : 'text-red-400'"
+               x-text="((sim.data?.summary?.total_return_pct ?? 0) >= 0 ? '+' : '') + (sim.data?.summary?.total_return_pct?.toFixed(2) ?? 0) + '%'">
+          </div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Trades</div>
+          <div class="text-xl font-bold text-slate-300" x-text="sim.data?.summary?.trade_count ?? 0"></div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Gewonnen</div>
+          <div class="text-xl font-bold text-emerald-400" x-text="sim.data?.summary?.win_count ?? 0"></div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Win Rate</div>
+          <div class="text-xl font-bold"
+               :class="(sim.data?.summary?.win_rate ?? 0) >= 50 ? 'text-emerald-400' : 'text-amber-400'"
+               x-text="(sim.data?.summary?.win_rate ?? 0) + '%'"></div>
+        </div>
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-1.5">Candles</div>
+          <div class="text-xl font-bold text-slate-400" x-text="sim.data?.summary?.candles_analyzed ?? 0"></div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div x-show="sim.data" class="bg-slate-900 border border-slate-800 rounded-2xl p-5">
+        <div class="flex items-center gap-4 mb-4">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Kursverlauf + Trades</span>
+          <span class="inline-flex items-center gap-1 text-xs text-emerald-400">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> Portfolio $
+          </span>
+          <span class="inline-flex items-center gap-1 text-xs text-sky-400">
+            <span class="w-2 h-2 rounded-full bg-sky-400 inline-block"></span> Preis
+          </span>
+          <span class="inline-flex items-center gap-1 text-xs text-green-400">&#9650; BUY</span>
+          <span class="inline-flex items-center gap-1 text-xs text-red-400">&#9660; SELL</span>
+        </div>
+        <div style="height: 400px; position: relative;">
+          <canvas id="sim-chart"></canvas>
+        </div>
+      </div>
+
+      <!-- Empty state -->
+      <div x-show="!sim.data && !sim.loading && !sim.error"
+           class="bg-slate-900 border border-slate-800 rounded-2xl p-16 text-center">
+        <div class="text-4xl mb-4">🔬</div>
+        <p class="text-slate-400 text-sm font-medium mb-2">LSTM-Simulation auf historischen Daten</p>
+        <p class="text-slate-600 text-xs">Wähle Zeitrahmen und Candle-Anzahl, dann "Simulation starten" klicken.<br>
+           Das Modell muss zuvor trainiert worden sein.</p>
+      </div>
+
     </div>
 
   </section>
@@ -1405,6 +1654,28 @@ def api_paper_run():
         return jsonify({"ok": False, "output": "Timeout nach 60 Sekunden."})
     except Exception as e:
         return jsonify({"ok": False, "output": str(e)})
+
+
+# -------------------------------------------------------
+# API — ML Simulation
+# -------------------------------------------------------
+@app.route("/api/simulation/run", methods=["POST"])
+@login_required
+def api_simulation_run():
+    tf = request.args.get("timeframe", "1h")
+    if tf not in ("1m", "5m", "1h"):
+        tf = "1h"
+    try:
+        limit = min(int(request.args.get("limit", 500)), 2000)
+    except ValueError:
+        limit = 500
+    try:
+        from ml_backtester import run_ml_backtest
+        result = run_ml_backtest(timeframe=tf, limit=limit)
+        return jsonify(result)
+    except Exception as e:
+        logger.error("ML simulation failed: %s", e)
+        return jsonify({"error": str(e)})
 
 
 # -------------------------------------------------------
