@@ -87,16 +87,37 @@ def cmd_backtest(args) -> None:
 
 
 def cmd_train(args) -> None:
-    from model_trainer import train
     setup_database()
-
     timeframe = getattr(args, "timeframe", "1h")
-    print(f"\nTraining Keras LSTM model on {timeframe} candles...")
-    print("This may take a few minutes depending on available data.\n")
+
+    if getattr(args, "validate", False):
+        from model_trainer import validate_walk_forward
+        from config import WALK_FORWARD_FOLDS
+        print(f"\nWalk-Forward Validation: {WALK_FORWARD_FOLDS} folds, timeframe={timeframe}\n")
+        try:
+            validate_walk_forward(timeframe=timeframe)
+        except ValueError as e:
+            print(f"\nValidation failed: {e}")
+        return
+
+    from model_trainer import train
+    print(f"\nTraining XGBoost model on {timeframe} candles...\n")
     try:
         train(timeframe=timeframe)
     except ValueError as e:
         print(f"\nTraining failed: {e}")
+
+
+def cmd_tune(args) -> None:
+    from model_trainer import tune
+    from config import OPTUNA_TRIALS
+    setup_database()
+    timeframe = getattr(args, "timeframe", "1h")
+    n_trials = getattr(args, "trials", None) or OPTUNA_TRIALS
+    try:
+        tune(timeframe=timeframe, n_trials=n_trials)
+    except ValueError as e:
+        print(f"\nTuning failed: {e}")
 
 
 def cmd_status(args) -> None:
@@ -142,10 +163,24 @@ Typical workflow:
 
     subparsers.add_parser("collect", help="Start live data collection loop")
 
-    tr_parser = subparsers.add_parser("train", help="Train Keras LSTM model on stored candles")
+    tr_parser = subparsers.add_parser("train", help="Train XGBoost model on stored candles")
     tr_parser.add_argument(
         "--timeframe", default="1h", choices=["1m", "5m", "1h"],
         help="Candle timeframe to train on (default: 1h)",
+    )
+    tr_parser.add_argument(
+        "--validate", action="store_true",
+        help="Run walk-forward validation instead of training (no model saved)",
+    )
+
+    tune_parser = subparsers.add_parser("tune", help="Tune XGBoost hyperparameters with Optuna")
+    tune_parser.add_argument(
+        "--timeframe", default="1h", choices=["1m", "5m", "1h"],
+        help="Candle timeframe (default: 1h)",
+    )
+    tune_parser.add_argument(
+        "--trials", type=int, default=None,
+        help="Number of Optuna trials (default from config)",
     )
 
     subparsers.add_parser("paper", help="Run one paper trading iteration")
@@ -171,6 +206,7 @@ Typical workflow:
         "collect": cmd_collect,
         "history": cmd_history,
         "train": cmd_train,
+        "tune": cmd_tune,
         "paper": cmd_paper,
         "trade": cmd_trade,
         "backtest": cmd_backtest,

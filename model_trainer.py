@@ -8,7 +8,6 @@ Label generation (look-ahead):
   otherwise               →  HOLD (class 0)
 
 Features: lagged FEATURE_COLUMNS at offsets defined by FEATURE_LAGS.
-No sequential model needed — XGBoost handles the flat feature vector.
 """
 import json
 import logging
@@ -19,8 +18,10 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    SYMBOL, MODEL_PATH, MODEL_METRICS_PATH, FEATURE_LAGS, LOOKAHEAD_BARS,
-    LABEL_THRESHOLD_PCT, TRAINING_EPOCHS, SMA_LONG, MIN_TRAINING_SAMPLES,
+    SYMBOL, MODEL_PATH, MODEL_METRICS_PATH, BEST_PARAMS_PATH,
+    FEATURE_LAGS, LOOKAHEAD_BARS, LABEL_THRESHOLD_PCT,
+    TRAINING_EPOCHS, SMA_LONG, MIN_TRAINING_SAMPLES,
+    WALK_FORWARD_FOLDS, OPTUNA_TRIALS,
 )
 from database import get_recent_candles
 from indicators import FEATURE_COLUMNS, calculate_all, prepare_model_features
@@ -55,33 +56,74 @@ def _build_feature_matrix(features: np.ndarray, labels: np.ndarray) -> tuple:
     return np.array(X, dtype=np.float32), np.array(y, dtype=int)
 
 
-def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
-    """Full XGBoost training pipeline: load data → features → labels → train → save."""
-    import xgboost as xgb
+def _load_best_params() -> dict:
+    if not os.path.exists(BEST_PARAMS_PATH):
+        return {}
+    try:
+        with open(BEST_PARAMS_PATH) as f:
+            params = json.load(f)
+        params.pop("best_val_accuracy", None)
+        logger.info("Loaded tuned hyperparameters from %s", BEST_PARAMS_PATH)
+        return params
+    except Exception as e:
+        logger.warning("Could not load best params: %s", e)
+        return {}
 
-    logger.info("Loading candle data: symbol=%s timeframe=%s", symbol, timeframe)
+
+def _build_sample_weights(y_train: np.ndarray) -> np.ndarray:
+    n_total = len(y_train)
+    counts = {cls: int((y_train == cls).sum()) for cls in [0, 1, 2]}
+    weight_map = {cls: min(n_total / (3 * cnt), 5.0) if cnt > 0 else 1.0
+                  for cls, cnt in counts.items()}
+    return np.array([weight_map[c] for c in y_train], dtype=np.float32), weight_map
+
+
+def _make_classifier(**extra_params) -> "xgb.XGBClassifier":
+    import xgboost as xgb
+    defaults = {
+        "max_depth": 5,
+        "learning_rate": 0.05,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "min_child_weight": 5,
+    }
+    defaults.update(extra_params)
+    return xgb.XGBClassifier(
+        n_estimators=TRAINING_EPOCHS,
+        objective="multi:softprob",
+        num_class=3,
+        eval_metric=["mlogloss", "merror"],
+        early_stopping_rounds=30,
+        random_state=42,
+        tree_method="hist",
+        verbosity=1,
+        **defaults,
+    )
+
+
+def _load_and_prepare(symbol: str, timeframe: str) -> tuple:
+    """Shared data-loading pipeline for train / validate / tune."""
     df = get_recent_candles(symbol, timeframe, limit=50000)
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     if len(df) < SMA_LONG + max(FEATURE_LAGS) + LOOKAHEAD_BARS + 1:
-        raise ValueError(
-            f"Not enough data: {len(df)} rows. Collect more candles and retry."
-        )
+        raise ValueError(f"Not enough data: {len(df)} rows.")
 
-    logger.info("Computing indicators on %d bars", len(df))
     df = calculate_all(df)
     df = prepare_model_features(df)
-
     clean = df[FEATURE_COLUMNS + ["close"]].dropna().reset_index(drop=True)
-    logger.info("Clean rows after indicator warmup: %d", len(clean))
-
-    if len(clean) < MIN_TRAINING_SAMPLES + max(FEATURE_LAGS) + LOOKAHEAD_BARS:
-        raise ValueError(f"Only {len(clean)} clean rows — need more data.")
 
     labels = _generate_labels(clean["close"])
     features = clean[FEATURE_COLUMNS].values.astype(np.float32)
-
     X, y = _build_feature_matrix(features, labels)
+    return X, y
+
+
+def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
+    """Full XGBoost training pipeline: load data → features → labels → train → save."""
+    logger.info("Loading candle data: symbol=%s timeframe=%s", symbol, timeframe)
+    X, y = _load_and_prepare(symbol, timeframe)
+
     logger.info(
         "Training samples: %d | features per sample: %d | class dist: HOLD=%d BUY=%d SELL=%d",
         len(y), X.shape[1],
@@ -91,40 +133,19 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
     if len(X) < MIN_TRAINING_SAMPLES:
         raise ValueError(f"Only {len(X)} windows after lagging. Need {MIN_TRAINING_SAMPLES}.")
 
-    # Chronological 80/20 split — no shuffling across the split point
     split = int(len(X) * 0.8)
     X_train, X_val = X[:split], X[split:]
     y_train, y_val = y[:split], y[split:]
 
-    # Sample weights for class balancing (capped at 5× to avoid over-correction)
-    n_total = len(y_train)
-    counts = {cls: int((y_train == cls).sum()) for cls in [0, 1, 2]}
-    weight_map = {cls: min(n_total / (3 * cnt), 5.0) if cnt > 0 else 1.0
-                  for cls, cnt in counts.items()}
-    sample_weight = np.array([weight_map[c] for c in y_train], dtype=np.float32)
-
+    sample_weight, weight_map = _build_sample_weights(y_train)
     logger.info(
         "Class weights (capped): HOLD=%.2f BUY=%.2f SELL=%.2f",
         weight_map[0], weight_map[1], weight_map[2],
     )
     logger.info("Train: %d  Val: %d  Features: %d", len(X_train), len(X_val), X.shape[1])
 
-    evals_result: dict = {}
-    model = xgb.XGBClassifier(
-        n_estimators=TRAINING_EPOCHS,
-        max_depth=5,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=5,
-        objective="multi:softprob",
-        num_class=3,
-        eval_metric=["mlogloss", "merror"],
-        early_stopping_rounds=30,
-        random_state=42,
-        tree_method="hist",
-        verbosity=1,
-    )
+    tuned = _load_best_params()
+    model = _make_classifier(**tuned)
     model.fit(
         X_train, y_train,
         sample_weight=sample_weight,
@@ -137,7 +158,6 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
     model.save_model(MODEL_PATH)
     logger.info("XGBoost model saved to %s", MODEL_PATH)
 
-    # Compute final metrics
     val_preds = model.predict(X_val)
     val_accuracy = float((val_preds == y_val).mean())
     val_loss_hist = evals_result.get("validation_1", {}).get("mlogloss", [1.0])
@@ -148,7 +168,6 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
     n_rounds = model.best_iteration + 1 if hasattr(model, "best_iteration") else TRAINING_EPOCHS
     val_loss_final = float(val_loss_hist[model.best_iteration]) if hasattr(model, "best_iteration") else val_loss_hist[-1]
 
-    # Feature importances (top features by gain)
     importance = model.get_booster().get_score(importance_type="gain")
     top_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:20]
 
@@ -182,5 +201,139 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
     print(f"  Val loss        : {val_loss_final:.4f}")
     print(f"  Val accuracy    : {val_accuracy:.4f}")
     print(f"  Model saved to  : {MODEL_PATH}")
-    print(f"  Class weights   : HOLD={weight_map[0]:.2f} BUY={weight_map[1]:.2f} SELL={weight_map[2]:.2f}")
+    if tuned:
+        print(f"  Using tuned params from {BEST_PARAMS_PATH}")
+    print()
+
+
+def validate_walk_forward(symbol: str = SYMBOL, timeframe: str = "1h",
+                           n_folds: int = WALK_FORWARD_FOLDS) -> list:
+    """
+    Honest out-of-sample evaluation via walk-forward cross-validation.
+    Trains on folds 0..k, tests on fold k+1. No model is saved.
+    """
+    logger.info("Walk-forward validation: symbol=%s timeframe=%s folds=%d", symbol, timeframe, n_folds)
+    X, y = _load_and_prepare(symbol, timeframe)
+
+    fold_size = len(X) // n_folds
+    if fold_size < MIN_TRAINING_SAMPLES:
+        raise ValueError(f"Too few samples per fold ({fold_size}). Need more data or fewer folds.")
+
+    tuned = _load_best_params()
+    results = []
+
+    for fold in range(1, n_folds):
+        train_end = fold * fold_size
+        val_start = train_end
+        val_end = min((fold + 1) * fold_size, len(X))
+
+        X_train, y_train = X[:train_end], y[:train_end]
+        X_val, y_val = X[val_start:val_end], y[val_start:val_end]
+
+        if len(X_val) == 0:
+            break
+
+        sw, _ = _build_sample_weights(y_train)
+
+        import xgboost as xgb
+        model = xgb.XGBClassifier(
+            n_estimators=TRAINING_EPOCHS,
+            objective="multi:softprob",
+            num_class=3,
+            eval_metric="mlogloss",
+            early_stopping_rounds=30,
+            random_state=42,
+            tree_method="hist",
+            verbosity=0,
+            **({**{"max_depth": 5, "learning_rate": 0.05, "subsample": 0.8,
+                   "colsample_bytree": 0.8, "min_child_weight": 5}, **tuned}),
+        )
+        model.fit(X_train, y_train, sample_weight=sw,
+                  eval_set=[(X_val, y_val)], verbose=False)
+
+        preds = model.predict(X_val)
+        acc = float((preds == y_val).mean())
+        results.append(acc)
+
+        dist = {cls: int((y_val == cls).sum()) for cls in [0, 1, 2]}
+        print(f"  Fold {fold}/{n_folds-1}  train={len(X_train):>6}  val={len(X_val):>5}  "
+              f"OOS acc={acc:.4f}  HOLD={dist[0]} BUY={dist[1]} SELL={dist[2]}")
+
+    avg = sum(results) / len(results) if results else 0.0
+    print(f"\n  Average OOS accuracy : {avg:.4f}  (random baseline = {1/3:.4f})")
+    return results
+
+
+def tune(symbol: str = SYMBOL, timeframe: str = "1h",
+         n_trials: int = OPTUNA_TRIALS) -> None:
+    """
+    Automated hyperparameter search using Optuna (3-fold walk-forward objective).
+    Saves best params to BEST_PARAMS_PATH for use by train().
+    """
+    try:
+        import optuna
+    except ImportError:
+        print("Optuna not installed. Run: pip install optuna")
+        return
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+    logger.info("Loading data for Optuna tuning: symbol=%s timeframe=%s", symbol, timeframe)
+    X, y = _load_and_prepare(symbol, timeframe)
+
+    n_folds = 3
+    fold_size = len(X) // n_folds
+
+    def objective(trial):
+        params = {
+            "max_depth":        trial.suggest_int("max_depth", 3, 8),
+            "learning_rate":    trial.suggest_float("learning_rate", 0.01, 0.2, log=True),
+            "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+            "subsample":        trial.suggest_float("subsample", 0.6, 1.0),
+            "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
+        }
+        accs = []
+        for fold in range(1, n_folds):
+            X_tr, y_tr = X[:fold * fold_size], y[:fold * fold_size]
+            X_v, y_v = X[fold * fold_size:(fold + 1) * fold_size], y[fold * fold_size:(fold + 1) * fold_size]
+            if len(X_v) == 0:
+                continue
+            sw, _ = _build_sample_weights(y_tr)
+            import xgboost as xgb
+            m = xgb.XGBClassifier(
+                n_estimators=100,
+                objective="multi:softprob",
+                num_class=3,
+                eval_metric="mlogloss",
+                early_stopping_rounds=20,
+                random_state=42,
+                tree_method="hist",
+                verbosity=0,
+                **params,
+            )
+            m.fit(X_tr, y_tr, sample_weight=sw, eval_set=[(X_v, y_v)], verbose=False)
+            accs.append(float((m.predict(X_v) == y_v).mean()))
+        return sum(accs) / len(accs) if accs else 0.0
+
+    print(f"\nOptuna Hyperparameter Tuning")
+    print(f"  Trials     : {n_trials}")
+    print(f"  CV folds   : {n_folds} (walk-forward)")
+    print(f"  Samples    : {len(X)}")
+    print()
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    best = {**study.best_params, "best_val_accuracy": round(study.best_value, 4)}
+    os.makedirs(os.path.dirname(BEST_PARAMS_PATH), exist_ok=True)
+    with open(BEST_PARAMS_PATH, "w") as f:
+        json.dump(best, f, indent=2)
+
+    print(f"\n=== Tuning Complete ===")
+    print(f"  Best OOS accuracy : {study.best_value:.4f}")
+    print(f"  Best params:")
+    for k, v in study.best_params.items():
+        print(f"    {k}: {v}")
+    print(f"  Saved to : {BEST_PARAMS_PATH}")
+    print(f"\nRun 'python main.py train' to train with best params.")
     print()

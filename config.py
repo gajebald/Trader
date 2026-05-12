@@ -52,9 +52,12 @@ LOOKBACK_STEPS = 48          # kept for ml_backtester compatibility
 FEATURE_LAGS = [0, 1, 2, 3, 6, 12, 24]  # bars lookback for XGBoost flat features
 LOOKAHEAD_BARS = 12          # bars ahead for labels (12h on 1h data)
 LABEL_THRESHOLD_PCT = 0.015  # 1.5% future move → BUY or SELL
+MIN_TRAINING_SAMPLES = 100   # minimum windows required to start training
 TRAINING_EPOCHS = 150        # max boosting rounds (early stopping applies)
 TRAINING_BATCH_SIZE = 32
-MIN_TRAINING_SAMPLES = 100   # minimum windows required to start training
+BEST_PARAMS_PATH = "models/best_params.json"
+WALK_FORWARD_FOLDS = 5
+OPTUNA_TRIALS = 50
 
 # --- Collection schedule ---
 COLLECT_INTERVAL_SECONDS = 60

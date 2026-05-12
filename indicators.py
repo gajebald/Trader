@@ -1,5 +1,6 @@
 import logging
 
+import numpy as np
 import pandas as pd
 
 from config import (
@@ -7,7 +8,7 @@ from config import (
     MACD_FAST, MACD_SLOW, MACD_SIGNAL, VOLATILITY_WINDOW,
 )
 
-# Ordered list of feature columns used by the Keras model.
+# Ordered list of feature columns used by the XGBoost model.
 # Order matters — must be identical between training and inference.
 FEATURE_COLUMNS = [
     "rsi_norm",
@@ -25,6 +26,11 @@ FEATURE_COLUMNS = [
     "bb_position",
     "bb_width_norm",
     "rsi_slope",
+    # New features
+    "obv_norm",       # On-Balance Volume z-score
+    "roc_6",          # 6-bar rate of change
+    "roc_24",         # 24-bar rate of change
+    "trend_regime",   # price vs SMA200 (market regime)
 ]
 
 logger = logging.getLogger(__name__)
@@ -79,16 +85,24 @@ def add_bollinger(df: pd.DataFrame, window: int = 20, std: float = 2.0) -> pd.Da
     return df
 
 
+def add_obv(df: pd.DataFrame) -> pd.DataFrame:
+    direction = np.sign(df["close"].diff()).fillna(0)
+    df["obv"] = (direction * df["volume"]).cumsum()
+    return df
+
+
 def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = add_sma(df, SMA_SHORT)
     df = add_sma(df, SMA_LONG)
+    df = add_sma(df, 200)           # for trend_regime feature
     df = add_ema(df, EMA_PERIOD)
     df = add_rsi(df)
     df = add_macd(df)
     df = add_volatility(df)
     df = add_volume_sma(df)
     df = add_bollinger(df)
+    df = add_obv(df)
     df["pct_change"] = df["close"].pct_change()
     return df
 
@@ -125,6 +139,19 @@ def prepare_model_features(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_width_norm"] = bb_range / df["bb_mid"].replace(0, float("nan"))
 
     df["rsi_slope"] = (df["rsi"].diff(3) / 30).clip(-1, 1)
+
+    # OBV normalized: z-score over 24 bars, scaled to [-1, 1]
+    obv_mean = df["obv"].rolling(24).mean()
+    obv_std = df["obv"].rolling(24).std()
+    df["obv_norm"] = ((df["obv"] - obv_mean) / (obv_std + 1e-8)).clip(-3, 3) / 3
+
+    # Multi-period rate of change
+    df["roc_6"] = (price / price.shift(6) - 1).clip(-0.1, 0.1)
+    df["roc_24"] = (price / price.shift(24) - 1).clip(-0.2, 0.2)
+
+    # Trend regime: price distance from SMA200, normalized
+    sma200 = df["sma_200"].replace(0, float("nan"))
+    df["trend_regime"] = ((price - sma200) / sma200).clip(-0.3, 0.3)
 
     return df
 
