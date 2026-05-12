@@ -78,7 +78,7 @@ def build_model(n_features: int):
         tf.keras.layers.Dense(3, activation="softmax"),  # HOLD, BUY, SELL
     ])
     model.compile(
-        optimizer="adam",
+        optimizer=tf.keras.optimizers.Adam(learning_rate=0.0005),
         loss="sparse_categorical_crossentropy",
         metrics=["accuracy"],
     )
