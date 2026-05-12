@@ -35,7 +35,7 @@ STARTING_CAPITAL = 1000.0  # USD
 # --- Keras LSTM model ---
 MODEL_PATH = "models/trading_model.keras"
 MODEL_METRICS_PATH = "models/training_metrics.json"
-LOOKBACK_STEPS = 72          # bars of history per prediction window (72h on 1h data)
+LOOKBACK_STEPS = 48          # bars of history per prediction window (48h on 1h data)
 LOOKAHEAD_BARS = 24          # bars ahead for labels (24h on 1h data)
 LABEL_THRESHOLD_PCT = 0.03   # 3% future move → BUY or SELL
 TRAINING_EPOCHS = 150

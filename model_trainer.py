@@ -66,14 +66,15 @@ def build_model(n_features: int):
     except ImportError:
         raise ImportError("TensorFlow is required. Install with: pip install tensorflow")
 
+    l2 = tf.keras.regularizers.l2(0.001)
+
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(LOOKBACK_STEPS, n_features)),
-        tf.keras.layers.LSTM(128, return_sequences=True),
+        tf.keras.layers.LSTM(64, return_sequences=True, recurrent_dropout=0.2),
         tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.LSTM(64, return_sequences=False),
+        tf.keras.layers.LSTM(32, return_sequences=False, recurrent_dropout=0.2),
         tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.Dense(32, activation="relu"),
-        tf.keras.layers.Dropout(0.2),
+        tf.keras.layers.Dense(16, activation="relu", kernel_regularizer=l2),
         tf.keras.layers.Dense(3, activation="softmax"),  # HOLD, BUY, SELL
     ])
     model.compile(
