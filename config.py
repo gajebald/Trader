@@ -33,12 +33,13 @@ MODEL_CONFIDENCE_THRESHOLD = 0.6
 STARTING_CAPITAL = 1000.0  # USD
 
 # --- Keras LSTM model ---
-MODEL_PATH = "models/trading_model.keras"
+MODEL_PATH = "models/trading_model.ubj"
 MODEL_METRICS_PATH = "models/training_metrics.json"
-LOOKBACK_STEPS = 48          # bars of history per prediction window (48h on 1h data)
+LOOKBACK_STEPS = 48          # kept for ml_backtester compatibility
+FEATURE_LAGS = [0, 1, 2, 3, 6, 12, 24]  # bars lookback for XGBoost flat features
 LOOKAHEAD_BARS = 24          # bars ahead for labels (24h on 1h data)
 LABEL_THRESHOLD_PCT = 0.03   # 3% future move → BUY or SELL
-TRAINING_EPOCHS = 150
+TRAINING_EPOCHS = 150        # max boosting rounds (early stopping applies)
 TRAINING_BATCH_SIZE = 32
 MIN_TRAINING_SAMPLES = 100   # minimum windows required to start training
 

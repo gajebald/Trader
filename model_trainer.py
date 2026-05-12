@@ -1,5 +1,5 @@
 """
-Trains a Keras LSTM model on historical IOTA candle data.
+Trains an XGBoost classifier on historical IOTA candle data.
 
 Label generation (look-ahead):
   future_return = (close[i+LOOKAHEAD] - close[i]) / close[i]
@@ -7,8 +7,8 @@ Label generation (look-ahead):
   < -LABEL_THRESHOLD_PCT  →  SELL (class 2)
   otherwise               →  HOLD (class 0)
 
-The model never sees future data during inference — only the past
-LOOKBACK_STEPS bars of normalized indicator features.
+Features: lagged FEATURE_COLUMNS at offsets defined by FEATURE_LAGS.
+No sequential model needed — XGBoost handles the flat feature vector.
 """
 import json
 import logging
@@ -19,9 +19,8 @@ import numpy as np
 import pandas as pd
 
 from config import (
-    SYMBOL, MODEL_PATH, MODEL_METRICS_PATH, LOOKBACK_STEPS, LOOKAHEAD_BARS,
-    LABEL_THRESHOLD_PCT, TRAINING_EPOCHS, TRAINING_BATCH_SIZE,
-    MIN_TRAINING_SAMPLES, SMA_LONG,
+    SYMBOL, MODEL_PATH, MODEL_METRICS_PATH, FEATURE_LAGS, LOOKAHEAD_BARS,
+    LABEL_THRESHOLD_PCT, TRAINING_EPOCHS, SMA_LONG, MIN_TRAINING_SAMPLES,
 )
 from database import get_recent_candles
 from indicators import FEATURE_COLUMNS, calculate_all, prepare_model_features
@@ -30,13 +29,8 @@ logger = logging.getLogger(__name__)
 
 
 def _generate_labels(close: pd.Series) -> np.ndarray:
-    """
-    Compute forward-looking labels for each bar.
-    Bars within LOOKAHEAD_BARS of the end are assigned HOLD (0)
-    because their future return cannot be fully observed.
-    """
     n = len(close)
-    labels = np.zeros(n, dtype=int)  # default HOLD
+    labels = np.zeros(n, dtype=int)
     for i in range(n - LOOKAHEAD_BARS):
         future_return = (close.iloc[i + LOOKAHEAD_BARS] - close.iloc[i]) / close.iloc[i]
         if future_return > LABEL_THRESHOLD_PCT:
@@ -46,176 +40,149 @@ def _generate_labels(close: pd.Series) -> np.ndarray:
     return labels
 
 
-def _create_sequences(features: np.ndarray, labels: np.ndarray) -> tuple:
+def _build_feature_matrix(features: np.ndarray, labels: np.ndarray) -> tuple:
     """
-    Slide a window of LOOKBACK_STEPS over the feature matrix.
-    For window ending at position i, label is labels[i].
-    Requires: features and labels have the same length.
+    Build flat feature matrix with lagged values for XGBoost.
+    For each bar i, X[i] = [features[i], features[i-lag1], features[i-lag2], ...]
+    Only rows where all lags are available are included.
     """
+    max_lag = max(FEATURE_LAGS)
     X, y = [], []
-    for i in range(LOOKBACK_STEPS, len(features)):
-        X.append(features[i - LOOKBACK_STEPS:i])
+    for i in range(max_lag, len(features)):
+        row = np.concatenate([features[i - lag] for lag in FEATURE_LAGS])
+        X.append(row)
         y.append(labels[i])
     return np.array(X, dtype=np.float32), np.array(y, dtype=int)
 
 
-def build_model(n_features: int):
-    """Two-layer LSTM for time-series classification into 3 classes."""
-    try:
-        import tensorflow as tf
-    except ImportError:
-        raise ImportError("TensorFlow is required. Install with: pip install tensorflow")
-
-    l2 = tf.keras.regularizers.l2(0.001)
-
-    model = tf.keras.Sequential([
-        tf.keras.layers.Input(shape=(LOOKBACK_STEPS, n_features)),
-        tf.keras.layers.LSTM(64, return_sequences=True, recurrent_dropout=0.2),
-        tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.LSTM(32, return_sequences=False, recurrent_dropout=0.2),
-        tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.Dense(16, activation="relu", kernel_regularizer=l2),
-        tf.keras.layers.Dense(3, activation="softmax"),  # HOLD, BUY, SELL
-    ])
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
-    )
-    return model
-
-
 def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
-    """Full training pipeline: load data → features → labels → train → save."""
-    try:
-        import tensorflow as tf
-    except ImportError:
-        raise ImportError("TensorFlow is required. Install with: pip install tensorflow")
+    """Full XGBoost training pipeline: load data → features → labels → train → save."""
+    import xgboost as xgb
 
     logger.info("Loading candle data: symbol=%s timeframe=%s", symbol, timeframe)
-    df = get_recent_candles(symbol, timeframe, limit=50000)  # load ALL available data
+    df = get_recent_candles(symbol, timeframe, limit=50000)
     df = df.sort_values("timestamp").reset_index(drop=True)
 
-    if len(df) < SMA_LONG + LOOKBACK_STEPS + LOOKAHEAD_BARS + 1:
+    if len(df) < SMA_LONG + max(FEATURE_LAGS) + LOOKAHEAD_BARS + 1:
         raise ValueError(
-            f"Not enough data: {len(df)} rows. "
-            f"Collect more candles with 'python main.py collect' and retry."
+            f"Not enough data: {len(df)} rows. Collect more candles and retry."
         )
 
     logger.info("Computing indicators on %d bars", len(df))
     df = calculate_all(df)
     df = prepare_model_features(df)
 
-    # Drop rows where any feature or the close price is NaN
-    clean = df[FEATURE_COLUMNS + ["close"]].dropna()
+    clean = df[FEATURE_COLUMNS + ["close"]].dropna().reset_index(drop=True)
     logger.info("Clean rows after indicator warmup: %d", len(clean))
 
-    if len(clean) < MIN_TRAINING_SAMPLES + LOOKBACK_STEPS + LOOKAHEAD_BARS:
-        raise ValueError(
-            f"Only {len(clean)} clean rows available. Need at least "
-            f"{MIN_TRAINING_SAMPLES + LOOKBACK_STEPS + LOOKAHEAD_BARS}. "
-            f"Run 'python main.py collect' longer and retry."
-        )
+    if len(clean) < MIN_TRAINING_SAMPLES + max(FEATURE_LAGS) + LOOKAHEAD_BARS:
+        raise ValueError(f"Only {len(clean)} clean rows — need more data.")
 
     labels = _generate_labels(clean["close"])
     features = clean[FEATURE_COLUMNS].values.astype(np.float32)
 
-    X, y = _create_sequences(features, labels)
+    X, y = _build_feature_matrix(features, labels)
     logger.info(
-        "Training sequences: %d | class distribution: HOLD=%d BUY=%d SELL=%d",
-        len(y),
+        "Training samples: %d | features per sample: %d | class dist: HOLD=%d BUY=%d SELL=%d",
+        len(y), X.shape[1],
         int((y == 0).sum()), int((y == 1).sum()), int((y == 2).sum()),
     )
 
     if len(X) < MIN_TRAINING_SAMPLES:
-        raise ValueError(
-            f"Only {len(X)} training windows after sequencing. Need {MIN_TRAINING_SAMPLES}."
-        )
+        raise ValueError(f"Only {len(X)} windows after lagging. Need {MIN_TRAINING_SAMPLES}.")
 
-    # Compute class weights — capped at 5.0 to prevent over-correction
-    n_total = len(y)
-    class_weight = {}
-    for cls in [0, 1, 2]:
-        count = int((y == cls).sum())
-        raw = n_total / (3 * count) if count > 0 else 1.0
-        class_weight[cls] = min(raw, 5.0)
-
-    logger.info(
-        "Class weights (capped): HOLD=%.2f BUY=%.2f SELL=%.2f",
-        class_weight[0], class_weight[1], class_weight[2],
-    )
-
-    # 80/20 train/validation split (time-ordered — no shuffling across the split)
+    # Chronological 80/20 split — no shuffling across the split point
     split = int(len(X) * 0.8)
     X_train, X_val = X[:split], X[split:]
     y_train, y_val = y[:split], y[split:]
 
+    # Sample weights for class balancing (capped at 5× to avoid over-correction)
+    n_total = len(y_train)
+    counts = {cls: int((y_train == cls).sum()) for cls in [0, 1, 2]}
+    weight_map = {cls: min(n_total / (3 * cnt), 5.0) if cnt > 0 else 1.0
+                  for cls, cnt in counts.items()}
+    sample_weight = np.array([weight_map[c] for c in y_train], dtype=np.float32)
+
     logger.info(
-        "Train size: %d | Val size: %d | Features: %d",
-        len(X_train), len(X_val), len(FEATURE_COLUMNS),
+        "Class weights (capped): HOLD=%.2f BUY=%.2f SELL=%.2f",
+        weight_map[0], weight_map[1], weight_map[2],
     )
+    logger.info("Train: %d  Val: %d  Features: %d", len(X_train), len(X_val), X.shape[1])
 
-    model = build_model(len(FEATURE_COLUMNS))
-    model.summary(print_fn=logger.info)
-
-    callbacks = [
-        tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=15, restore_best_weights=True
-        ),
-        tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=6, min_lr=1e-5
-        ),
-    ]
-
-    history = model.fit(
+    evals_result: dict = {}
+    model = xgb.XGBClassifier(
+        n_estimators=TRAINING_EPOCHS,
+        max_depth=5,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        min_child_weight=5,
+        objective="multi:softprob",
+        num_class=3,
+        eval_metric=["mlogloss", "merror"],
+        early_stopping_rounds=30,
+        random_state=42,
+        tree_method="hist",
+        verbosity=1,
+    )
+    model.fit(
         X_train, y_train,
-        epochs=TRAINING_EPOCHS,
-        batch_size=TRAINING_BATCH_SIZE,
-        validation_data=(X_val, y_val),
-        class_weight=class_weight,
-        callbacks=callbacks,
-        verbose=1,
+        sample_weight=sample_weight,
+        eval_set=[(X_train, y_train), (X_val, y_val)],
+        verbose=10,
+        callbacks=[xgb.callback.EvaluationMonitor()],
     )
+    # Pull evals from booster directly (works with all xgb versions)
+    evals_result = model.evals_result()
 
-    # Save model
     os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-    model.save(MODEL_PATH)
-    logger.info("Model saved to %s", MODEL_PATH)
+    model.save_model(MODEL_PATH)
+    logger.info("XGBoost model saved to %s", MODEL_PATH)
 
-    # Report final metrics
-    val_loss = history.history["val_loss"][-1]
-    val_acc = history.history["val_accuracy"][-1]
-    epochs_run = len(history.history["loss"])
+    # Compute final metrics
+    val_preds = model.predict(X_val)
+    val_accuracy = float((val_preds == y_val).mean())
+    val_loss_hist = evals_result.get("validation_1", {}).get("mlogloss", [1.0])
+    val_acc_hist = [1.0 - e for e in evals_result.get("validation_1", {}).get("merror", [0.0])]
+    train_loss_hist = evals_result.get("validation_0", {}).get("mlogloss", [1.0])
+    train_acc_hist = [1.0 - e for e in evals_result.get("validation_0", {}).get("merror", [0.0])]
 
-    # Save metrics JSON for the dashboard
+    n_rounds = model.best_iteration + 1 if hasattr(model, "best_iteration") else TRAINING_EPOCHS
+    val_loss_final = float(val_loss_hist[model.best_iteration]) if hasattr(model, "best_iteration") else val_loss_hist[-1]
+
+    # Feature importances (top features by gain)
+    importance = model.get_booster().get_score(importance_type="gain")
+    top_features = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:20]
+
     metrics = {
         "trained_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "timeframe": timeframe,
-        "epochs_ran": epochs_run,
-        "val_loss": round(float(val_loss), 4),
-        "val_accuracy": round(float(val_acc), 4),
+        "epochs_ran": n_rounds,
+        "val_loss": round(val_loss_final, 4),
+        "val_accuracy": round(val_accuracy, 4),
         "train_samples": len(X_train),
         "val_samples": len(X_val),
         "class_weights": {
-            "HOLD": round(class_weight[0], 3),
-            "BUY": round(class_weight[1], 3),
-            "SELL": round(class_weight[2], 3),
+            "HOLD": round(weight_map[0], 3),
+            "BUY":  round(weight_map[1], 3),
+            "SELL": round(weight_map[2], 3),
         },
+        "feature_importances": {k: round(v, 2) for k, v in top_features},
         "history": {
-            "loss":         [round(float(x), 4) for x in history.history["loss"]],
-            "val_loss":     [round(float(x), 4) for x in history.history["val_loss"]],
-            "accuracy":     [round(float(x), 4) for x in history.history["accuracy"]],
-            "val_accuracy": [round(float(x), 4) for x in history.history["val_accuracy"]],
+            "loss":         [round(float(x), 4) for x in train_loss_hist],
+            "val_loss":     [round(float(x), 4) for x in val_loss_hist],
+            "accuracy":     [round(float(x), 4) for x in train_acc_hist],
+            "val_accuracy": [round(float(x), 4) for x in val_acc_hist],
         },
     }
     with open(MODEL_METRICS_PATH, "w") as fh:
         json.dump(metrics, fh, indent=2)
     logger.info("Metrics saved to %s", MODEL_METRICS_PATH)
 
-    print(f"\n=== Training Complete ===")
-    print(f"  Epochs ran      : {epochs_run}")
-    print(f"  Val loss        : {val_loss:.4f}")
-    print(f"  Val accuracy    : {val_acc:.4f}")
+    print(f"\n=== XGBoost Training Complete ===")
+    print(f"  Boosting rounds : {n_rounds}")
+    print(f"  Val loss        : {val_loss_final:.4f}")
+    print(f"  Val accuracy    : {val_accuracy:.4f}")
     print(f"  Model saved to  : {MODEL_PATH}")
-    print(f"  Class weights   : HOLD={class_weight[0]:.2f} BUY={class_weight[1]:.2f} SELL={class_weight[2]:.2f}")
+    print(f"  Class weights   : HOLD={weight_map[0]:.2f} BUY={weight_map[1]:.2f} SELL={weight_map[2]:.2f}")
     print()

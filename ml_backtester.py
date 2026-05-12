@@ -1,7 +1,6 @@
 """
-ML-based backtest: slides the trained LSTM over historical candles,
-applies the same strategy rules as paper_trader.py, and returns
-price + portfolio equity + BUY/SELL markers for charting.
+XGBoost-based backtest: builds flat lagged feature matrix, runs batch prediction,
+then replays strategy rules step-by-step over historical candles.
 """
 import logging
 
@@ -9,7 +8,7 @@ import numpy as np
 from datetime import datetime
 
 from config import (
-    SYMBOL, STARTING_CAPITAL, TRADE_FEE_PCT, LOOKBACK_STEPS,
+    SYMBOL, STARTING_CAPITAL, TRADE_FEE_PCT, FEATURE_LAGS,
     MODEL_CONFIDENCE_THRESHOLD, RSI_OVERBOUGHT, STOP_LOSS_PCT, TAKE_PROFIT_PCT,
     MODEL_PATH,
 )
@@ -26,19 +25,20 @@ def _load_model():
     if not os.path.exists(MODEL_PATH):
         return None
     try:
-        import tensorflow as tf
-        model = tf.keras.models.load_model(MODEL_PATH)
-        logger.info("ML backtest: model loaded from %s", MODEL_PATH)
-        return model
+        import xgboost as xgb
+        m = xgb.XGBClassifier()
+        m.load_model(MODEL_PATH)
+        logger.info("XGBoost backtest: model loaded from %s", MODEL_PATH)
+        return m
     except Exception as e:
-        logger.error("ML backtest: failed to load model: %s", e)
+        logger.error("XGBoost backtest: failed to load model: %s", e)
         return None
 
 
 def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
                     limit: int = 500, threshold: float | None = None) -> dict:
     """
-    Batch-predict all windows in one model.predict() call, then
+    Build flat lagged feature matrix, batch-predict with XGBoost, then
     replay strategy rules step-by-step. Returns chart-ready JSON data.
     """
     if threshold is None:
@@ -48,15 +48,16 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
         return {"error": "Kein trainiertes Modell gefunden — bitte zuerst Training starten."}
 
     df = get_recent_candles(symbol, timeframe, limit=limit)
-    if df.empty or len(df) < LOOKBACK_STEPS + 10:
+    max_lag = max(FEATURE_LAGS)
+    if df.empty or len(df) < max_lag + 10:
         return {"error": f"Nicht genug Daten ({len(df)} Candles) — bitte zuerst Daten sammeln."}
 
     df = calculate_all(df)
     df = prepare_model_features(df)
-    clean = df.dropna(subset=FEATURE_COLUMNS + ["close", "rsi"]).reset_index(drop=True)
+    clean = df.dropna(subset=FEATURE_COLUMNS + ["close", "rsi", "sma_20", "sma_50"]).reset_index(drop=True)
     n = len(clean)
 
-    if n < LOOKBACK_STEPS + 10:
+    if n < max_lag + 10:
         return {"error": f"Nicht genug saubere Zeilen nach Indikator-Warmup ({n})."}
 
     features   = clean[FEATURE_COLUMNS].values.astype(np.float32)
@@ -65,12 +66,16 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
     sma20_arr  = clean["sma_20"].values
     sma50_arr  = clean["sma_50"].values
     timestamps = clean["timestamp"].values
-    n_windows  = n - LOOKBACK_STEPS
 
-    # Batch all prediction windows in one forward pass
-    X = np.stack([features[i : i + LOOKBACK_STEPS] for i in range(n_windows)])
-    logger.info("ML backtest: predicting %d windows (timeframe=%s)", n_windows, timeframe)
-    probs = model.predict(X, verbose=0)   # shape: (n_windows, 3)
+    # Build full flat feature matrix for all predictable bars
+    n_windows = n - max_lag
+    X = np.array([
+        np.concatenate([features[i + max_lag - lag] for lag in FEATURE_LAGS])
+        for i in range(n_windows)
+    ], dtype=np.float32)
+
+    logger.info("XGBoost backtest: predicting %d windows (timeframe=%s)", n_windows, timeframe)
+    probs = model.predict_proba(X)   # shape: (n_windows, 3)
 
     # Step-by-step trade simulation
     cash         = STARTING_CAPITAL
@@ -83,7 +88,7 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
     sell_prices  = []
 
     for i in range(n_windows):
-        bar   = LOOKBACK_STEPS + i
+        bar   = max_lag + i
         price = float(closes_arr[bar])
         rsi   = float(rsis_arr[bar])
         sma20 = float(sma20_arr[bar])
@@ -108,8 +113,8 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
                 action, reason = "BUY", f"model ({confidence:.0%})"
 
         if action == "BUY" and cash > 1.0:
-            fee       = cash * TRADE_FEE_PCT
-            qty       = (cash - fee) / price
+            fee         = cash * TRADE_FEE_PCT
+            qty         = (cash - fee) / price
             entry_price = price
             entry_fee   = fee
             holdings    = qty
@@ -137,17 +142,17 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
 
     labels = [
         datetime.fromtimestamp(int(ts) / 1000).strftime("%d.%m %H:%M")
-        for ts in timestamps[LOOKBACK_STEPS:]
+        for ts in timestamps[max_lag:]
     ]
-    closes_out = [round(float(closes_arr[LOOKBACK_STEPS + i]), 4) for i in range(n_windows)]
+    closes_out = [round(float(closes_arr[max_lag + i]), 4) for i in range(n_windows)]
 
-    sells    = [t for t in trades if t["type"] == "SELL"]
-    wins     = [t for t in sells  if t.get("pnl", 0) > 0]
-    end_cap  = equity_curve[-1] if equity_curve else STARTING_CAPITAL
-    ret_pct  = (end_cap - STARTING_CAPITAL) / STARTING_CAPITAL * 100
+    sells   = [t for t in trades if t["type"] == "SELL"]
+    wins    = [t for t in sells  if t.get("pnl", 0) > 0]
+    end_cap = equity_curve[-1] if equity_curve else STARTING_CAPITAL
+    ret_pct = (end_cap - STARTING_CAPITAL) / STARTING_CAPITAL * 100
 
     logger.info(
-        "ML backtest done: %d trades, return=%.2f%%, end=$%.2f",
+        "XGBoost backtest done: %d trades, return=%.2f%%, end=$%.2f",
         len(trades), ret_pct, end_cap,
     )
 

@@ -117,7 +117,8 @@ info "Installiere $TF_PKG und weitere Abhängigkeiten..."
 pip install --quiet --upgrade pip
 pip install --quiet "requests>=2.31.0" "pandas>=2.0.0" "schedule>=1.2.0" "numpy>=1.24.0"
 pip install --quiet "${TF_PKG}>=2.13.0"
-success "Abhängigkeiten installiert (${TF_PKG})."
+pip install --quiet "xgboost>=2.0.0" "scikit-learn>=1.3.0"
+success "Abhängigkeiten installiert (${TF_PKG}, xgboost, scikit-learn)."
 
 # -------------------------------------------------------
 # Schritt 5: Verzeichnisse anlegen und Installation prüfen
