@@ -1198,10 +1198,12 @@ _TEMPLATE = """<!DOCTYPE html>
           <select x-model.number="sim.limit"
                   class="bg-slate-900 border border-slate-700 rounded-lg text-xs text-slate-300
                          px-2 py-1.5 focus:outline-none focus:border-sky-600 transition-colors">
-            <option value="200">200</option>
-            <option value="500" selected>500</option>
+            <option value="500">500</option>
             <option value="1000">1000</option>
             <option value="2000">2000</option>
+            <option value="5000">5000</option>
+            <option value="10000" selected>10000</option>
+            <option value="20000">20000</option>
           </select>
         </div>
         <div class="flex items-center gap-2">
