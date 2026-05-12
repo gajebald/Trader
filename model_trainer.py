@@ -68,11 +68,12 @@ def build_model(n_features: int):
 
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(LOOKBACK_STEPS, n_features)),
-        tf.keras.layers.LSTM(64, return_sequences=True),
+        tf.keras.layers.LSTM(128, return_sequences=True),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.LSTM(64, return_sequences=False),
+        tf.keras.layers.Dropout(0.3),
+        tf.keras.layers.Dense(32, activation="relu"),
         tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.LSTM(32, return_sequences=False),
-        tf.keras.layers.Dropout(0.2),
-        tf.keras.layers.Dense(16, activation="relu"),
         tf.keras.layers.Dense(3, activation="softmax"),  # HOLD, BUY, SELL
     ])
     model.compile(
@@ -130,13 +131,13 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
             f"Only {len(X)} training windows after sequencing. Need {MIN_TRAINING_SAMPLES}."
         )
 
-    # Compute class weights — capped at 3.0 to prevent over-correction
+    # Compute class weights — capped at 5.0 to prevent over-correction
     n_total = len(y)
     class_weight = {}
     for cls in [0, 1, 2]:
         count = int((y == cls).sum())
         raw = n_total / (3 * count) if count > 0 else 1.0
-        class_weight[cls] = min(raw, 3.0)
+        class_weight[cls] = min(raw, 5.0)
 
     logger.info(
         "Class weights (capped): HOLD=%.2f BUY=%.2f SELL=%.2f",
@@ -158,10 +159,10 @@ def train(symbol: str = SYMBOL, timeframe: str = "1h") -> None:
 
     callbacks = [
         tf.keras.callbacks.EarlyStopping(
-            monitor="val_loss", patience=8, restore_best_weights=True
+            monitor="val_loss", patience=15, restore_best_weights=True
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
-            monitor="val_loss", factor=0.5, patience=4, min_lr=1e-5
+            monitor="val_loss", factor=0.5, patience=6, min_lr=1e-5
         ),
     ]
 

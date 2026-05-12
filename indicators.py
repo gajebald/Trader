@@ -21,6 +21,10 @@ FEATURE_COLUMNS = [
     "volatility_norm",
     "pct_change_clipped",
     "high_low_ratio",
+    "volume_ratio",
+    "bb_position",
+    "bb_width_norm",
+    "rsi_slope",
 ]
 
 logger = logging.getLogger(__name__)
@@ -61,6 +65,20 @@ def add_volatility(df: pd.DataFrame, window: int = VOLATILITY_WINDOW) -> pd.Data
     return df
 
 
+def add_volume_sma(df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
+    df["volume_sma_20"] = df["volume"].rolling(window=window).mean()
+    return df
+
+
+def add_bollinger(df: pd.DataFrame, window: int = 20, std: float = 2.0) -> pd.DataFrame:
+    rolling = df["close"].rolling(window=window)
+    df["bb_mid"] = rolling.mean()
+    bb_std = rolling.std()
+    df["bb_upper"] = df["bb_mid"] + std * bb_std
+    df["bb_lower"] = df["bb_mid"] - std * bb_std
+    return df
+
+
 def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df = add_sma(df, SMA_SHORT)
@@ -69,6 +87,8 @@ def calculate_all(df: pd.DataFrame) -> pd.DataFrame:
     df = add_rsi(df)
     df = add_macd(df)
     df = add_volatility(df)
+    df = add_volume_sma(df)
+    df = add_bollinger(df)
     df["pct_change"] = df["close"].pct_change()
     return df
 
@@ -96,6 +116,16 @@ def prepare_model_features(df: pd.DataFrame) -> pd.DataFrame:
     df["volatility_norm"] = df["volatility"] / price
     df["pct_change_clipped"] = df["pct_change"].clip(-0.1, 0.1)
     df["high_low_ratio"] = (df["high"] - df["low"]) / low
+
+    vol_sma = df["volume_sma_20"].replace(0, float("nan"))
+    df["volume_ratio"] = (df["volume"] / vol_sma).clip(0, 5)
+
+    bb_range = (df["bb_upper"] - df["bb_lower"]).replace(0, float("nan"))
+    df["bb_position"] = (df["close"] - df["bb_lower"]) / bb_range
+    df["bb_width_norm"] = bb_range / df["bb_mid"].replace(0, float("nan"))
+
+    df["rsi_slope"] = (df["rsi"].diff(3) / 30).clip(-1, 1)
+
     return df
 
 

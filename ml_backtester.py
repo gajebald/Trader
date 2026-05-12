@@ -62,6 +62,8 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
     features   = clean[FEATURE_COLUMNS].values.astype(np.float32)
     closes_arr = clean["close"].values
     rsis_arr   = clean["rsi"].values
+    sma20_arr  = clean["sma_20"].values
+    sma50_arr  = clean["sma_50"].values
     timestamps = clean["timestamp"].values
     n_windows  = n - LOOKBACK_STEPS
 
@@ -84,6 +86,8 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
         bar   = LOOKBACK_STEPS + i
         price = float(closes_arr[bar])
         rsi   = float(rsis_arr[bar])
+        sma20 = float(sma20_arr[bar])
+        sma50 = float(sma50_arr[bar])
 
         pred_idx   = int(np.argmax(probs[i]))
         confidence = float(probs[i][pred_idx])
@@ -97,10 +101,10 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
                 action, reason = "SELL", "stop_loss"
             elif price >= entry_price * (1 + TAKE_PROFIT_PCT):
                 action, reason = "SELL", "take_profit"
-            elif rsi > RSI_OVERBOUGHT and decision == "SELL" and confidence >= threshold:
-                action, reason = "SELL", f"rsi+model ({confidence:.0%})"
+            elif decision == "SELL" and confidence >= threshold:
+                action, reason = "SELL", f"model ({confidence:.0%})"
         else:
-            if rsi <= RSI_OVERBOUGHT and decision == "BUY" and confidence >= threshold:
+            if rsi <= RSI_OVERBOUGHT and sma20 > sma50 and decision == "BUY" and confidence >= threshold:
                 action, reason = "BUY", f"model ({confidence:.0%})"
 
         if action == "BUY" and cash > 1.0:

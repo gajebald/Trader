@@ -39,19 +39,19 @@ def apply_rules(
         if current_price and check_take_profit(entry_price, current_price):
             return "SELL", f"take_profit triggered at {current_price:.4f} (entry {entry_price:.4f})"
 
-        if (
-            rsi is not None
-            and rsi > RSI_OVERBOUGHT
-            and model_decision == "SELL"
-            and model_confidence >= MODEL_CONFIDENCE_THRESHOLD
-        ):
-            return "SELL", f"rsi_overbought ({rsi:.1f}) + model SELL (conf={model_confidence:.2f})"
+        if model_decision == "SELL" and model_confidence >= MODEL_CONFIDENCE_THRESHOLD:
+            return "SELL", f"model SELL (conf={model_confidence:.2f})"
 
         return "HOLD", "no_exit_conditions_met"
 
     # No open position — evaluate entry
     if rsi is not None and rsi > RSI_OVERBOUGHT:
         return "HOLD", f"rsi_overbought ({rsi:.1f})"
+
+    sma_20 = signals.get("sma_20")
+    sma_50 = signals.get("sma_50")
+    if sma_20 is not None and sma_50 is not None and sma_20 <= sma_50:
+        return "HOLD", "downtrend (sma20 <= sma50)"
 
     if model_decision == "BUY" and model_confidence >= MODEL_CONFIDENCE_THRESHOLD:
         return "BUY", f"model BUY (conf={model_confidence:.2f}, risk={model_advice.get('risk_level')})"
