@@ -1225,7 +1225,7 @@ _TEMPLATE = """<!DOCTYPE html>
             Berechne…
           </span>
         </button>
-        <span class="text-xs text-slate-600">LSTM-Modell auf historischen Daten</span>
+        <span class="text-xs text-slate-600">XGBoost-Modell auf historischen Daten</span>
       </div>
 
       <!-- Error state -->
@@ -1297,7 +1297,7 @@ _TEMPLATE = """<!DOCTYPE html>
       <div x-show="!sim.data && !sim.loading && !sim.error"
            class="bg-slate-900 border border-slate-800 rounded-2xl p-16 text-center">
         <div class="text-4xl mb-4">🔬</div>
-        <p class="text-slate-400 text-sm font-medium mb-2">LSTM-Simulation auf historischen Daten</p>
+        <p class="text-slate-400 text-sm font-medium mb-2">XGBoost-Simulation auf historischen Daten</p>
         <p class="text-slate-600 text-xs">Wähle Zeitrahmen und Candle-Anzahl, dann "Simulation starten" klicken.<br>
            Das Modell muss zuvor trainiert worden sein.</p>
       </div>
