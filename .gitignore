@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.env
+
+# Database (contains real data, can be large)
+*.db
+*.db-shm
+*.db-wal
+
+# Trained model files (can be hundreds of MB)
+models/*.keras
+models/*.h5
+models/*.ubj
+
+# Telegram credentials — never commit
+telegram.conf
+
+# Logs
+logs/
+*.log
+
+# TensorFlow
+.tensorflow/

@@ -1,5 +1,18 @@
 import os
 
+def _load_telegram_conf():
+    path = os.path.join(os.path.dirname(__file__), "telegram.conf")
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+_load_telegram_conf()
+
 # --- Bitfinex API ---
 BITFINEX_BASE = "https://api-pub.bitfinex.com/v2"
 SYMBOL = "tIOTUSD"
@@ -24,18 +37,38 @@ VOLATILITY_WINDOW = 20
 # --- Strategy thresholds ---
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
-STOP_LOSS_PCT = 0.03      # 3% below entry price
-TAKE_PROFIT_PCT = 0.05    # 5% above entry price
+STOP_LOSS_PCT = 0.025     # 2.5% below entry — gives trade room to develop
+TAKE_PROFIT_PCT = 0.03    # 3% above entry price
 TRADE_FEE_PCT = 0.002     # 0.2% per trade
-LLM_CONFIDENCE_THRESHOLD = 0.6
+MODEL_CONFIDENCE_THRESHOLD = 0.6
 
 # --- Paper trading ---
 STARTING_CAPITAL = 1000.0  # USD
 
-# --- LLM (Ollama) ---
-OLLAMA_URL = "http://localhost:11434/api/generate"
-OLLAMA_MODEL = "llama3"
-OLLAMA_TIMEOUT = 30  # seconds
+# --- Keras LSTM model ---
+MODEL_PATH = "models/trading_model.ubj"
+MODEL_METRICS_PATH = "models/training_metrics.json"
+LOOKBACK_STEPS = 48          # kept for ml_backtester compatibility
+FEATURE_LAGS = [0, 1, 2, 3, 6, 12, 24]  # bars lookback for XGBoost flat features
+LOOKAHEAD_BARS = 12          # bars ahead for labels (12h on 1h data)
+LABEL_THRESHOLD_PCT = 0.015  # 1.5% future move → BUY or SELL
+MIN_TRAINING_SAMPLES = 100   # minimum windows required to start training
+TRAINING_EPOCHS = 150        # max boosting rounds (early stopping applies)
+TRAINING_BATCH_SIZE = 32
+BEST_PARAMS_PATH = "models/best_params.json"
+WALK_FORWARD_FOLDS = 5
+OPTUNA_TRIALS = 50
 
 # --- Collection schedule ---
 COLLECT_INTERVAL_SECONDS = 60
+
+# --- Web Dashboard ---
+DASHBOARD_HOST = "127.0.0.1"  # nur lokal, nginx proxied von außen
+DASHBOARD_PORT = 5000
+DASHBOARD_REFRESH_SECONDS = 30
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "iota2024")
+DASHBOARD_SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "change-this-secret-key-in-production")
+
+# --- Telegram ---
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
