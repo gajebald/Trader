@@ -60,7 +60,7 @@ def _create_sequences(features: np.ndarray, labels: np.ndarray) -> tuple:
 
 
 def build_model(n_features: int):
-    """Two-layer GRU with BatchNorm for time-series classification into 3 classes."""
+    """Two-layer LSTM for time-series classification into 3 classes."""
     try:
         import tensorflow as tf
     except ImportError:
@@ -70,11 +70,9 @@ def build_model(n_features: int):
 
     model = tf.keras.Sequential([
         tf.keras.layers.Input(shape=(LOOKBACK_STEPS, n_features)),
-        tf.keras.layers.GRU(64, return_sequences=True, recurrent_dropout=0.1),
-        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.LSTM(64, return_sequences=True, recurrent_dropout=0.2),
         tf.keras.layers.Dropout(0.3),
-        tf.keras.layers.GRU(32, return_sequences=False, recurrent_dropout=0.1),
-        tf.keras.layers.BatchNormalization(),
+        tf.keras.layers.LSTM(32, return_sequences=False, recurrent_dropout=0.2),
         tf.keras.layers.Dropout(0.3),
         tf.keras.layers.Dense(16, activation="relu", kernel_regularizer=l2),
         tf.keras.layers.Dense(3, activation="softmax"),  # HOLD, BUY, SELL
