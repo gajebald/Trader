@@ -24,7 +24,7 @@ VOLATILITY_WINDOW = 20
 # --- Strategy thresholds ---
 RSI_OVERBOUGHT = 70
 RSI_OVERSOLD = 30
-STOP_LOSS_PCT = 0.015     # 1.5% below entry price
+STOP_LOSS_PCT = 0.025     # 2.5% below entry — gives trade room to develop
 TAKE_PROFIT_PCT = 0.03    # 3% above entry price
 TRADE_FEE_PCT = 0.002     # 0.2% per trade
 MODEL_CONFIDENCE_THRESHOLD = 0.6
