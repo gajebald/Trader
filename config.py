@@ -1,5 +1,18 @@
 import os
 
+def _load_telegram_conf():
+    path = os.path.join(os.path.dirname(__file__), "telegram.conf")
+    if not os.path.exists(path):
+        return
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip())
+
+_load_telegram_conf()
+
 # --- Bitfinex API ---
 BITFINEX_BASE = "https://api-pub.bitfinex.com/v2"
 SYMBOL = "tIOTUSD"
