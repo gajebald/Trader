@@ -133,7 +133,7 @@ _TEMPLATE = """<!DOCTYPE html>
       paperLog:    '',
       historyLog:  '',
       trainingLog: '',
-      sim: { loading: false, tf: '1h', limit: 500, data: null, error: '', chart: null },
+      sim: { loading: false, tf: '1h', limit: 500, threshold: 0.45, data: null, error: '', chart: null },
       priceChart:   null,
       priceChartTf: '1h',
       priceLoading: false,
@@ -390,7 +390,7 @@ _TEMPLATE = """<!DOCTYPE html>
         if (this.sim.chart) { this.sim.chart.destroy(); this.sim.chart = null; }
         try {
           const r = await fetch(
-            '/api/simulation/run?timeframe=' + this.sim.tf + '&limit=' + this.sim.limit,
+            '/api/simulation/run?timeframe=' + this.sim.tf + '&limit=' + this.sim.limit + '&threshold=' + this.sim.threshold,
             { method: 'POST' }
           );
           const d = await r.json();
@@ -815,40 +815,40 @@ _TEMPLATE = """<!DOCTYPE html>
   <!-- ===== TABS ===== -->
   <section>
     <!-- Tab bar -->
-    <div class="flex gap-0 border-b border-slate-800 mb-5 -mx-1">
+    <div class="flex gap-0 border-b border-slate-800 mb-5 -mx-1 overflow-x-auto no-scrollbar">
       <button @click="activeTab = 'kurs'"
               :class="activeTab === 'kurs'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
                 : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg flex-shrink-0">
         Kurschart
       </button>
       <button @click="activeTab = 'signals'"
               :class="activeTab === 'signals'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
                 : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg flex-shrink-0">
         Signale
       </button>
       <button @click="activeTab = 'model'"
               :class="activeTab === 'model'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
                 : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg flex-shrink-0">
         Modell
       </button>
       <button @click="activeTab = 'data'"
               :class="activeTab === 'data'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
                 : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg flex-shrink-0">
         Daten
       </button>
       <button @click="activeTab = 'trades'"
               :class="activeTab === 'trades'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
                 : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg flex-shrink-0">
         Trades
         {% if trades %}<span class="ml-1.5 bg-slate-800 text-slate-400 text-xs rounded-full px-1.5 py-0.5">{{ trades|length }}</span>{% endif %}
       </button>
@@ -856,7 +856,7 @@ _TEMPLATE = """<!DOCTYPE html>
               :class="activeTab === 'sim'
                 ? 'text-sky-400 border-b-2 border-sky-400 bg-sky-400/5'
                 : 'text-slate-500 hover:text-slate-300 border-b-2 border-transparent'"
-              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg">
+              class="px-5 py-2.5 text-sm font-medium transition-colors -mb-px rounded-t-lg flex-shrink-0">
         Simulation
       </button>
     </div>
@@ -1196,6 +1196,13 @@ _TEMPLATE = """<!DOCTYPE html>
             <option value="1000">1000</option>
             <option value="2000">2000</option>
           </select>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500">Konfidenz:</span>
+          <input type="range" x-model.number="sim.threshold" min="0.30" max="0.80" step="0.05"
+                 class="w-24 accent-sky-400 cursor-pointer">
+          <span class="text-xs font-mono font-semibold text-sky-400 w-8"
+                x-text="Math.round(sim.threshold * 100) + '%'"></span>
         </div>
         <button @click="runSimulation()"
                 :disabled="sim.loading"
@@ -1670,8 +1677,13 @@ def api_simulation_run():
     except ValueError:
         limit = 500
     try:
+        threshold = float(request.args.get("threshold", 0.45))
+        threshold = max(0.30, min(threshold, 0.90))
+    except ValueError:
+        threshold = 0.45
+    try:
         from ml_backtester import run_ml_backtest
-        result = run_ml_backtest(timeframe=tf, limit=limit)
+        result = run_ml_backtest(timeframe=tf, limit=limit, threshold=threshold)
         return jsonify(result)
     except Exception as e:
         logger.error("ML simulation failed: %s", e)

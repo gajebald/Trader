@@ -35,11 +35,14 @@ def _load_model():
         return None
 
 
-def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h", limit: int = 500) -> dict:
+def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
+                    limit: int = 500, threshold: float | None = None) -> dict:
     """
     Batch-predict all windows in one model.predict() call, then
     replay strategy rules step-by-step. Returns chart-ready JSON data.
     """
+    if threshold is None:
+        threshold = MODEL_CONFIDENCE_THRESHOLD
     model = _load_model()
     if model is None:
         return {"error": "Kein trainiertes Modell gefunden — bitte zuerst Training starten."}
@@ -94,10 +97,10 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h", limit: int = 50
                 action, reason = "SELL", "stop_loss"
             elif price >= entry_price * (1 + TAKE_PROFIT_PCT):
                 action, reason = "SELL", "take_profit"
-            elif rsi > RSI_OVERBOUGHT and decision == "SELL" and confidence >= MODEL_CONFIDENCE_THRESHOLD:
+            elif rsi > RSI_OVERBOUGHT and decision == "SELL" and confidence >= threshold:
                 action, reason = "SELL", f"rsi+model ({confidence:.0%})"
         else:
-            if rsi <= RSI_OVERBOUGHT and decision == "BUY" and confidence >= MODEL_CONFIDENCE_THRESHOLD:
+            if rsi <= RSI_OVERBOUGHT and decision == "BUY" and confidence >= threshold:
                 action, reason = "BUY", f"model ({confidence:.0%})"
 
         if action == "BUY" and cash > 1.0:
