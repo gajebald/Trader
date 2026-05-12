@@ -109,7 +109,7 @@ def run_ml_backtest(symbol: str = SYMBOL, timeframe: str = "1h",
             elif decision == "SELL" and confidence >= threshold:
                 action, reason = "SELL", f"model ({confidence:.0%})"
         else:
-            if rsi <= RSI_OVERBOUGHT and sma20 > sma50 and decision == "BUY" and confidence >= threshold:
+            if rsi <= RSI_OVERBOUGHT and price > sma50 and sma20 > sma50 and decision == "BUY" and confidence >= threshold:
                 action, reason = "BUY", f"model ({confidence:.0%})"
 
         if action == "BUY" and cash > 1.0:

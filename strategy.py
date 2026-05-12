@@ -50,8 +50,9 @@ def apply_rules(
 
     sma_20 = signals.get("sma_20")
     sma_50 = signals.get("sma_50")
-    if sma_20 is not None and sma_50 is not None and sma_20 <= sma_50:
-        return "HOLD", "downtrend (sma20 <= sma50)"
+    last_price = signals.get("last_price")
+    if sma_20 is not None and sma_50 is not None and (sma_20 <= sma_50 or (last_price is not None and last_price < sma_50)):
+        return "HOLD", "downtrend (price or sma20 below sma50)"
 
     if model_decision == "BUY" and model_confidence >= MODEL_CONFIDENCE_THRESHOLD:
         return "BUY", f"model BUY (conf={model_confidence:.2f}, risk={model_advice.get('risk_level')})"
