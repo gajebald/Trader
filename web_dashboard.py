@@ -179,6 +179,13 @@ _TEMPLATE = """<!DOCTYPE html>
         } catch { this.training.running = null; }
       },
 
+      async fetchTrainingLog() {
+        try {
+          const d = await fetch('/api/training/log').then(r => r.json());
+          if (d.lines) this.trainingLog = d.lines;
+        } catch {}
+      },
+
       async pollHistory() {
         try {
           const d = await fetch('/api/history/status').then(r => r.json());
@@ -216,17 +223,16 @@ _TEMPLATE = """<!DOCTYPE html>
         const tf = document.getElementById('train-tf').value;
         this.trainingLog = 'Starte Training (' + tf + ')…';
         const d = await fetch('/api/training/start?timeframe=' + tf, { method: 'POST' }).then(r => r.json());
-        this.trainingLog = d.message || '';
+        if (!d.ok) { this.trainingLog = d.message || 'Fehler'; return; }
         await this.pollTraining();
         const poll = setInterval(async () => {
           await this.pollTraining();
+          await this.fetchTrainingLog();
           if (!this.training.running) {
             clearInterval(poll);
-            this.trainingLog = this.training.model_ready
-              ? '\\u2713 Training abgeschlossen — Modell gespeichert.'
-              : '\\u2717 Training beendet (kein Modell gefunden).';
+            await this.fetchTrainingLog();
           }
-        }, 5000);
+        }, 3000);
       },
 
       async runPaper() {
@@ -806,7 +812,8 @@ _TEMPLATE = """<!DOCTYPE html>
           &#129504; Training starten
         </button>
         <div x-show="trainingLog" x-text="trainingLog"
-             class="mt-2 text-xs text-slate-500 font-mono bg-slate-950 rounded-lg p-2"></div>
+             class="mt-2 text-xs text-slate-400 font-mono bg-slate-950 rounded-lg p-3
+                    whitespace-pre-wrap max-h-64 overflow-y-auto leading-5"></div>
       </div>
 
     </div>
@@ -1617,6 +1624,21 @@ def api_training_status():
         "running": _training_running(),
         "model_ready": os.path.exists(MODEL_PATH),
     })
+
+
+@app.route("/api/training/log")
+@login_required
+def api_training_log():
+    log_path = SCRIPT_DIR / "logs" / "training.log"
+    if not log_path.exists():
+        return jsonify({"lines": "Noch kein Training-Log vorhanden."})
+    try:
+        with open(log_path, "r", errors="replace") as fh:
+            lines = fh.readlines()
+        tail = "".join(lines[-80:]).strip()
+        return jsonify({"lines": tail})
+    except Exception as e:
+        return jsonify({"lines": f"Log-Fehler: {e}"})
 
 
 @app.route("/api/training/start", methods=["POST"])
